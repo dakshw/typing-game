@@ -2,6 +2,9 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+  <meta http-equiv="Pragma" content="no-cache">
+  <meta http-equiv="Expires" content="0">
   <title>Speed Typing Test - 1v1 Multi</title>
   <style>
     :root { --mt-yellow: #e2b714; --line-height: 38px; }
@@ -49,8 +52,6 @@
     .game-area { display: none; }
     .type-area { position: relative; }
 
-    /* 3줄만 보이는 뷰포트: quote-display 를 translateY 로 밀어올려서
-       현재 타이핑 중인 줄이 항상 맨 윗줄에 오도록 스크롤한다. */
     .quote-viewport { position: relative; height: calc(var(--line-height) * 3); overflow: hidden; margin-bottom: 6px; text-align: left; cursor: text; }
     .quote-display { position: relative; line-height: var(--line-height); font-size: 1.4rem; letter-spacing: 0.5px; color: #646669; transition: transform 0.25s ease; word-break: keep-all; }
     .quote-display span.char { position: relative; }
@@ -66,7 +67,6 @@
     .mode-badge { display: inline-block; margin-top: 6px; padding: 4px 10px; font-size: 0.8rem; background: #263238; border-radius: 12px; color: #80cbc4; }
     .stats { display: flex; justify-content: space-around; margin-top: 4px; font-size: 1.2rem; }
 
-    /* 상대방 커서: 내 커서와 동일 구조, 파란색 */
     .caret.opp-caret { background: #2196f3; }
 
     .result-banner { text-align: left; }
@@ -94,8 +94,6 @@
     .dash-stat-row .k { color: #888; }
     .dash-stat-row .v { color: #fff; font-weight: bold; }
 
-    /* 경쟁전 시작 시 나 vs 상대 프로필/티어 배너.
-       카운트다운 동안만 보여주고, 타이핑이 시작되면 hidden-state 클래스로 부드럽게 접는다. */
     .matchup-bar { display: flex; align-items: center; justify-content: space-between; gap: 10px; background: #1a1a1a; border: 1px solid #333; border-radius: 10px; padding: 14px 18px; margin-bottom: 14px; opacity: 1; max-height: 100px; overflow: hidden; transition: opacity 0.35s ease, max-height 0.35s ease, padding 0.35s ease, margin 0.35s ease, border-width 0.35s ease; }
     .matchup-bar.hidden-state { opacity: 0; max-height: 0; padding-top: 0; padding-bottom: 0; margin-bottom: 0; border-width: 0; pointer-events: none; }
     .matchup-player { flex: 1; display: flex; align-items: center; gap: 10px; min-width: 0; }
@@ -106,29 +104,9 @@
     .matchup-info .tier-badge { display: inline-flex; align-items: center; gap: 4px; font-size: 0.72rem; font-weight: bold; padding: 2px 9px; border-radius: 10px; margin-top: 4px; border: 1px solid; white-space: nowrap; }
     .matchup-vs { flex-shrink: 0; font-weight: bold; color: #555; font-size: 0.85rem; padding: 0 6px; }
 
-    /* 프로필 설정 */
     .user-info-row { display: flex; align-items: center; justify-content: center; gap: 10px; margin-bottom: 15px; }
     .my-avatar-badge { width: 30px; height: 30px; border-radius: 50%; background: #1c1c1c; border: 1px solid #444; display: flex; align-items: center; justify-content: center; font-size: 1rem; }
-    .btn-profile { background: none; border: 1px solid #444; color: #999; border-radius: 50%; width: 26px; height: 26px; cursor: pointer; font-size: 0.85rem; line-height: 1; }
-    .btn-profile:hover { border-color: var(--mt-yellow); color: var(--mt-yellow); }
 
-    .modal-overlay { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.6); align-items: center; justify-content: center; z-index: 50; }
-    .modal-overlay.show { display: flex; }
-    .modal-box { width: 360px; background: #1c1c1c; border: 1px solid #333; border-radius: 12px; padding: 22px; text-align: left; }
-    .modal-box h3 { margin: 0 0 16px; font-size: 1.1rem; color: var(--mt-yellow); }
-    .modal-label { font-size: 0.8rem; color: #999; margin-bottom: 6px; display: block; }
-    .modal-input { width: 100%; box-sizing: border-box; padding: 10px 12px; font-size: 0.95rem; background: #121212; border: 1px solid #444; border-radius: 6px; color: #fff; margin-bottom: 4px; }
-    .modal-input:focus { outline: none; border-color: var(--mt-yellow); }
-    .modal-hint { font-size: 0.72rem; color: #666; margin-bottom: 16px; }
-    .avatar-grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 8px; margin-bottom: 18px; }
-    .avatar-option { aspect-ratio: 1; display: flex; align-items: center; justify-content: center; font-size: 1.3rem; background: #121212; border: 2px solid #333; border-radius: 8px; cursor: pointer; }
-    .avatar-option:hover { border-color: #666; }
-    .avatar-option.selected { border-color: var(--mt-yellow); background: #262110; }
-    .modal-actions { display: flex; justify-content: flex-end; gap: 8px; }
-    .btn-cancel { background: transparent; border: 1px solid #444; color: #aaa; padding: 9px 16px; border-radius: 6px; cursor: pointer; font-size: 0.9rem; }
-    .btn-save { background: var(--mt-yellow); border: none; color: #121212; font-weight: bold; padding: 9px 16px; border-radius: 6px; cursor: pointer; font-size: 0.9rem; }
-
-    /* 비밀방(프라이빗 룸) 관련 */
     .private-section { margin-top: 18px; display: flex; flex-direction: column; align-items: center; gap: 10px; }
     .btn-private { padding: 12px 24px; font-size: 0.95rem; font-weight: bold; background: #1c1c1c; border: 2px solid #6c63ff; color: #6c63ff; border-radius: 10px; cursor: pointer; transition: border-color 0.15s, transform 0.15s; }
     .btn-private:hover { border-color: #8b83ff; transform: translateY(-2px); }
@@ -156,9 +134,7 @@
     .room-waiting .dots::after { content: ''; animation: dots 1.4s steps(4, end) infinite; }
     @keyframes dots { 0%,20% { content: ''; } 40% { content: '.'; } 60% { content: '..'; } 80%,100% { content: '...'; } }
 
-    /* 리더보드 */
     .leaderboard-section { margin-bottom: 16px; }
-    /* 상단 헤더 탭: 화면 전체 너비 */
     .header-tabs { display: flex; width: 100%; margin-bottom: 14px; border-bottom: 2px solid #222; }
     .header-tab { flex: 1; padding: 12px 0; font-size: 1rem; font-weight: bold; background: transparent; border: none; color: #555; cursor: pointer; transition: color 0.15s, border-color 0.15s; border-bottom: 3px solid transparent; margin-bottom: -2px; }
     .header-tab:hover { color: #aaa; }
@@ -179,7 +155,6 @@
     .lb-score { font-weight: bold; color: #fff; margin-left: 8px; min-width: 50px; text-align: right; }
     .lb-empty { text-align: center; padding: 20px; color: #555; font-size: 0.85rem; }
 
-    /* Report */
     .btn-report { background: transparent; border: 1px solid #555; color: #888; font-size: 0.72rem; padding: 3px 8px; border-radius: 4px; cursor: pointer; margin-left: 8px; vertical-align: middle; transition: all 0.15s; }
     .btn-report:hover { border-color: #ca4754; color: #ca4754; }
     .btn-report:disabled { opacity: 0.4; cursor: not-allowed; }
@@ -195,15 +170,12 @@
     .report-option.selected { border-color: #ca4754; background: rgba(202,71,84,0.08); }
     .report-option input[type="radio"] { accent-color: #ca4754; }
 
-    /* Lobby header — hidden during in-game */
     .lobby-header.hidden { display: none !important; }
 
-    /* SPA view switching */
     .view { display: none; }
     .view.active { display: block; }
     .view.hidden { display: none !important; }
 
-    /* Rank/Trophy full-page leaderboard */
     .lb-fullpage { margin-top: 0; }
     .lb-fullpage .lb-list { max-height: calc(100vh - 120px); overflow-y: auto; background: #1a1a1a; border: 1px solid #333; border-radius: 10px; }
     .lb-fullpage .lb-row { padding: 10px 16px; font-size: 0.95rem; }
@@ -216,22 +188,18 @@
 <body>
 
   <div class="container">
-    <!-- 상단 탭 헤더 (in-game 에도 잠깐 숨김) -->
     <div class="header-tabs" id="headerTabs">
       <button class="header-tab active" data-view="play" onclick="switchView('play')">🎮 Play</button>
       <button class="header-tab" data-view="rank" onclick="switchView('rank')">🏆 Rank</button>
       <button class="header-tab" data-view="trophy" onclick="switchView('trophy')">🎖 Trophy</button>
     </div>
 
-    <!-- in-game 시 전체 숨김 -->
     <div id="lobbyHeader">
 
-    <!-- Play 탭: 프로필 + 매칭 UI -->
     <div class="view active" id="playView">
       <div class="user-info-row">
         <div class="my-avatar-badge" id="myAvatarBadge">😀</div>
-        <div class="user-info"><span id="myNameDisplay">Guest</span> · MMR <span id="myRatingDisplay">1000</span></div>
-        <button class="btn-profile" onclick="openProfileModal()" title="Profile Settings">⚙</button>
+        <div class="user-info"><span id="myNameDisplay">Connecting...</span> · MMR <span id="myRatingDisplay">1000</span></div>
       </div>
 
       <div class="tab-row" id="typeTab">
@@ -291,7 +259,6 @@
       </div>
     </div>
 
-    <!-- Rank 탭: MMR 리더보드 전면 -->
     <div class="view" id="rankView">
       <div class="lb-fullpage">
         <div class="lb-list" id="rankLeaderboard">
@@ -300,7 +267,6 @@
       </div>
     </div>
 
-    <!-- Trophy 탭: 트로피 리더보드 전면 -->
     <div class="view" id="trophyView">
       <div class="lb-fullpage">
         <div class="lb-list" id="trophyLeaderboard">
@@ -385,29 +351,10 @@
     </div>
   </div>
 
-  <div class="modal-overlay" id="profileModalOverlay">
-    <div class="modal-box">
-      <h3>Profile Settings</h3>
-
-      <label class="modal-label">Nickname</label>
-      <input type="text" class="modal-input" id="profileNameInput" maxlength="10" placeholder="Enter nickname (2-10 chars)">
-      <div class="modal-hint">2-10 characters, spaces removed. Forbidden words are blocked.</div>
-
-      <label class="modal-label">Avatar</label>
-      <div class="avatar-grid" id="avatarGrid"></div>
-
-      <div class="modal-actions">
-        <button class="btn-cancel" onclick="closeProfileModal()">Cancel</button>
-        <button class="btn-save" onclick="saveProfile()">Save</button>
-      </div>
-    </div>
-  </div>
-
   <script src="/socket.io/socket.io.js"></script>
   <script>
     const socket = io();
-    const LINE_HEIGHT = 38; // CSS --line-height 와 반드시 동일하게 유지
-    const PLAYER_ID_KEY = 'typingPlayerId';
+    const LINE_HEIGHT = 38;
 
     let isRanked = false;
     let currentMode = 'time';
@@ -422,8 +369,6 @@
     let myTrophies = 0;
     let myName = '';
     let myAvatar = '😀';
-    let allowedAvatars = [];
-    let draftAvatar = '😀'; // 모달에서 선택 중인 아바타(저장 전까지는 임시값)
     let normalWins = 0;
     let requiredUnlockWins = 3;
     let rankedUnlocked = false;
@@ -447,12 +392,8 @@
       selectedReportReason = null;
       document.querySelectorAll('.report-option').forEach(o => o.classList.remove('selected'));
       document.querySelectorAll('input[name="reportReason"]').forEach(r => r.checked = false);
-      // 제출 버튼 상태 초기화
       const submitBtn = document.querySelector('.report-modal-box .btn-save');
-      if (submitBtn) {
-        submitBtn.disabled = false;
-        submitBtn.innerText = 'Submit Report';
-      }
+      if (submitBtn) { submitBtn.disabled = false; submitBtn.innerText = 'Submit Report'; }
       document.getElementById('reportModalOverlay').classList.add('show');
     }
 
@@ -467,78 +408,27 @@
     }
 
     function submitReport() {
-      if (!selectedReportReason) {
-        document.getElementById('statusMessage').innerText = '⚠️ Please select a reason.';
-        return;
-      }
-      if (!lastOpponentId || !lastRoomId) {
-        document.getElementById('statusMessage').innerText = '⚠️ No opponent data available.';
-        closeReportModal();
-        return;
-      }
-
-      if (reportedMatchIds.has(lastRoomId)) {
-        document.getElementById('statusMessage').innerText = '⚠️ You already reported in this match.';
-        closeReportModal();
-        return;
-      }
-
-      // 제출 버튼 비활성화 (중복 클릭 방지)
+      if (!selectedReportReason) { document.getElementById('statusMessage').innerText = '⚠️ Please select a reason.'; return; }
+      if (!lastOpponentId || !lastRoomId) { document.getElementById('statusMessage').innerText = '⚠️ No opponent data available.'; closeReportModal(); return; }
+      if (reportedMatchIds.has(lastRoomId)) { document.getElementById('statusMessage').innerText = '⚠️ You already reported in this match.'; closeReportModal(); return; }
       const submitBtn = document.querySelector('.report-modal-box .btn-save');
-      if (submitBtn) {
-        submitBtn.disabled = true;
-        submitBtn.innerText = 'Submitting...';
-      }
-
-      socket.emit('report_player', {
-        targetPlayerId: lastOpponentId,
-        roomId: lastRoomId,
-        reason: selectedReportReason,
-        matchStats: lastMatchStats || {}
-      });
-
+      if (submitBtn) { submitBtn.disabled = true; submitBtn.innerText = 'Submitting...'; }
+      socket.emit('report_player', { targetPlayerId: lastOpponentId, roomId: lastRoomId, reason: selectedReportReason, matchStats: lastMatchStats || {} });
       reportedMatchIds.add(lastRoomId);
     }
 
     socket.on('reportResult', (data) => {
       closeReportModal();
-
-      // 제출 버튼 상태 복원
       const submitBtn = document.querySelector('.report-modal-box .btn-save');
-      if (submitBtn) {
-        submitBtn.disabled = false;
-        submitBtn.innerText = 'Submit Report';
-      }
-
+      if (submitBtn) { submitBtn.disabled = false; submitBtn.innerText = 'Submit Report'; }
       if (data.success) {
         document.getElementById('statusMessage').innerText = '✅ Report submitted. Thank you!';
-        // 신고 버튼 비활성화
         const reportBtn = document.getElementById('reportBtn');
-        if (reportBtn) {
-          reportBtn.disabled = true;
-          reportBtn.innerText = 'Reported';
-        }
+        if (reportBtn) { reportBtn.disabled = true; reportBtn.innerText = 'Reported'; }
       } else {
         document.getElementById('statusMessage').innerText = '⚠️ ' + (data.message || 'Report failed.');
       }
     });
-
-    function getOrCreatePlayerId() {
-      try {
-        let id = localStorage.getItem(PLAYER_ID_KEY);
-        if (!id || !/^[A-Za-z0-9_-]{8,64}$/.test(id)) {
-          if (window.crypto && typeof window.crypto.randomUUID === 'function') {
-            id = window.crypto.randomUUID().replace(/-/g, '');
-          } else {
-            id = 'p' + Math.random().toString(36).slice(2) + Date.now().toString(36);
-          }
-          localStorage.setItem(PLAYER_ID_KEY, id);
-        }
-        return id;
-      } catch (e) {
-        return 'p' + Math.random().toString(36).slice(2) + Date.now().toString(36);
-      }
-    }
 
     function applyUnlockStatus(data, options) {
       if (!data) return;
@@ -560,12 +450,8 @@
       barFill.style.width = `${ratio}%`;
       panel.classList.toggle('hidden', rankedUnlocked && !opts.keepPanel);
 
-      if (rankedUnlocked && isRanked === false) {
-        rankedBtn.classList.remove('active');
-      }
-      if (!rankedUnlocked && isRanked) {
-        switchMatchKind(false, true);
-      }
+      if (rankedUnlocked && isRanked === false) rankedBtn.classList.remove('active');
+      if (!rankedUnlocked && isRanked) switchMatchKind(false, true);
 
       if (data.justUnlocked || opts.justUnlocked) {
         document.getElementById('statusMessage').innerText = `🎉 ${requiredUnlockWins} Casual wins! Ranked is now unlocked.`;
@@ -574,103 +460,45 @@
       }
     }
 
-    // === 닉네임 검열: 금지어 목록 (소문자 기준 부분 일치) ===
-    // 로드 시점(loadProfileOnStartup)보다 먼저 선언되어야 하므로 파일 상단에 배치.
-    // 비속어 / 성적 / 아동학대 / 인종차별 단어 전부 차단.
-    const FORBIDDEN_WORDS = [
-      // 성적 / 음란
-      'sex', 'sexy', 'porn', 'childporn', 'cp', 'nude', 'nudes', 'xxx', 'hentai',
-      'dick', 'penis', 'vagina', 'boob', 'tits', 'slut', 'whore', 'rape', 'horny',
-      // 아동학대 / 아동음란
-      'pedofile', 'pedophile', 'ped0', 'pedo', 'pedophile', 'childporn', 'cp',
-      // 인종차별
-      'nigger', 'nigga', 'nlgger', 'faggot', 'nazi', 'chink', 'spic', 'wetback', 'kike',
-      // 일반 비속어
-      'fuck', 'shit', 'bitch', 'asshole', 'cunt', 'bastard', 'damn', 'motherfucker'
-    ];
-
-    function generateGuestName() {
-      return 'Guest_' + Math.floor(1000 + Math.random() * 9000);
+    function updateTopBar() {
+      document.getElementById('myRatingDisplay').innerText = myRating;
+      document.getElementById('myNameDisplay').innerText = myName || 'Connecting...';
+      document.getElementById('myAvatarBadge').innerText = myAvatar || '😀';
+      const trophySpan = document.getElementById('myTrophyDisplay');
+      if (trophySpan) trophySpan.innerText = myTrophies;
     }
 
-    function containsForbiddenWord(name) {
-      const lower = (name || '').toLowerCase();
-      return FORBIDDEN_WORDS.some(w => lower.includes(w));
-    }
-
-    // 공백 제거 후 2~10자, <> 금지, 금지어 포함 금지
-    function isValidNickname(raw) {
-      const trimmed = (raw || '').replace(/\s+/g, '');
-      if (trimmed.length < 2 || trimmed.length > 10) return false;
-      if (/[<>]/.test(trimmed)) return false;
-      if (containsForbiddenWord(trimmed)) return false;
-      return true;
-    }
-
-    // === 페이지 로드 즉시 localStorage 프로필을 UI에 반영 (Guest 플래시 방지) ===
-    // 저장된 이름이 금지어 포함/무효라면 즉시 Guest_숫자로 교체하고 localStorage도 덮어쓴다.
-    (function loadProfileOnStartup() {
-      const saved = loadSavedProfile();
-      if (saved) {
-        if (saved.name) {
-          if (isValidNickname(saved.name)) {
-            myName = saved.name;
+    function getOrCreatePlayerId() {
+      try {
+        let id = localStorage.getItem('typingPlayerId');
+        if (!id || !/^[A-Za-z0-9_-]{8,64}$/.test(id)) {
+          if (window.crypto && typeof window.crypto.randomUUID === 'function') {
+            id = window.crypto.randomUUID().replace(/-/g, '');
           } else {
-            myName = generateGuestName();
-            saveProfileToStorage(myName, saved.avatar || myAvatar); // 로컬 저장소도 즉시 교체
+            id = 'p' + Math.random().toString(36).slice(2) + Date.now().toString(36);
           }
-          document.getElementById('myNameDisplay').innerText = myName;
+          localStorage.setItem('typingPlayerId', id);
         }
-        if (saved.avatar) { myAvatar = saved.avatar; document.getElementById('myAvatarBadge').innerText = saved.avatar; }
+        return id;
+      } catch (e) {
+        return 'p' + Math.random().toString(36).slice(2) + Date.now().toString(36);
       }
-    })();
+    }
 
-    // 소켓 연결 시마다(재접속 포함) 저장된 프로필을 서버에 전송하고,
-    // 프로필 처리 완료(ACK) 후에만 리더보드를 요청한다.
+    // 서버 연결 시 identify만 보냄 (프로필 입력/전송 없음)
     socket.on('connect', () => {
-      const saved = loadSavedProfile();
-      // 서버 전송 전 클라이언트 단 한 번 더 필터링 (금지어/무효 이름은 Guest_숫자로 교체)
-      let sendName = (saved && saved.name) || myName;
-      if (!isValidNickname(sendName)) {
-        sendName = generateGuestName();
-        myName = sendName;
-        saveProfileToStorage(sendName, (saved && saved.avatar) || myAvatar);
-        updateTopBar();
-      }
-      const profileData = { name: sendName, avatar: (saved && saved.avatar) || myAvatar };
-
-      // setProfile에 ACK 콜백을 넘겨 프로필 등록 완료 시점에 리더보드를 요청
-      socket.emit('setProfile', profileData, () => {
-        fetchLeaderboard();
-      });
-
       socket.emit('identify', { playerId: getOrCreatePlayerId() });
+      fetchLeaderboard();
     });
 
+    // 서버가 부여한 Player #번호 + 랭킹/칭호 태그를 그대로 표시
     socket.on('initUser', (data) => {
       myRating = data.rating;
       myTrophies = data.trophies || 0;
-      allowedAvatars = data.allowedAvatars || [];
-      applyUnlockStatus(data);
-
-      // 서버 검증 완료 닉네임을 역방향 동기화 (서버 우선)
-      // 서버가 이미 Guest_ 교체를 마쳤을 수 있으므로 유효한 이름은 무조건 서버 값을 따르고
-      // localStorage도 같이 덮어써서 서버/로컬 불일치를 제거한다.
-      if (data.name && isValidNickname(data.name)) {
-        if (myName !== data.name) {
-          myName = data.name;
-          saveProfileToStorage(myName, myAvatar);
-        }
-      } else if (data.name) {
-        // 서버 이름조차 무효하면(방어 코드) 로컬에서도 Guest_ 교체
-        myName = generateGuestName();
-        saveProfileToStorage(myName, myAvatar);
-      }
-
+      if (data.name) myName = data.name;
       if (data.avatar) myAvatar = data.avatar;
-
+      applyUnlockStatus(data);
       updateTopBar();
-      // initUser 수신 시 리더보드도 갱신 (connect ACK보다 먼저 도착할 수 있음)
       fetchLeaderboard();
     });
 
@@ -689,146 +517,17 @@
       setLobbyVisible(true);
       backToMainModes();
       document.getElementById('title').innerText = 'Select Match Duration';
-      document.getElementById('statusMessage').innerText =
-        `🔒 Ranked unlocks after ${requiredUnlockWins} Casual wins. (${normalWins}/${requiredUnlockWins})`;
+      document.getElementById('statusMessage').innerText = `🔒 Ranked unlocks after ${requiredUnlockWins} Casual wins. (${normalWins}/${requiredUnlockWins})`;
     });
 
     socket.on('trophyUpdate', (data) => {
-  myTrophies = data.trophies;
-  updateTopBar();
-});
-
-socket.on('profileUpdated', (data) => {
-  // 서버가 검증/강제 교체(Guest_숫자)까지 마친 최종 닉네임을 역방향 동기화
-  if (data.name && isValidNickname(data.name)) {
-    if (myName !== data.name) {
-      myName = data.name;
-      saveProfileToStorage(myName, myAvatar);
-    }
-  }
-  if (data.avatarAccepted !== false && data.avatar) myAvatar = data.avatar;
-  updateTopBar();
-});
-
-function updateTopBar() {
-  document.getElementById('myRatingDisplay').innerText = myRating;
-  document.getElementById('myNameDisplay').innerText = myName;
-  document.getElementById('myAvatarBadge').innerText = myAvatar;
-
-  let trophySpan = document.getElementById('myTrophyDisplay');
-  if (!trophySpan) {
-    const userInfo = document.querySelector('.user-info');
-    if (userInfo) {
-      userInfo.innerHTML = `<span id="myNameDisplay">${myName}</span> · MMR <span id="myRatingDisplay">${myRating}</span> · 🏆 <span id="myTrophyDisplay">${myTrophies}</span>`;
-    }
-  } else {
-    trophySpan.innerText = myTrophies;
-  }
-}
-
-    function loadSavedProfile() {
-      try {
-        const raw = localStorage.getItem('typingProfile');
-        return raw ? JSON.parse(raw) : null;
-      } catch (e) {
-        return null;
-      }
-    }
-
-    function saveProfileToStorage(name, avatar) {
-      try {
-        localStorage.setItem('typingProfile', JSON.stringify({ name, avatar }));
-      } catch (e) {
-        // localStorage 사용 불가 환경이면 조용히 무시 (프로필은 세션 동안만 유지됨)
-      }
-    }
-
-    function openProfileModal() {
-      draftAvatar = myAvatar;
-      document.getElementById('profileNameInput').value = myName;
-      renderAvatarGrid();
-      document.getElementById('profileModalOverlay').classList.add('show');
-    }
-
-    function closeProfileModal() {
-      document.getElementById('profileModalOverlay').classList.remove('show');
-    }
-
-    function renderAvatarGrid() {
-      const grid = document.getElementById('avatarGrid');
-      grid.innerHTML = '';
-      allowedAvatars.forEach((emoji) => {
-        const cell = document.createElement('div');
-        cell.className = 'avatar-option' + (emoji === draftAvatar ? ' selected' : '');
-        cell.innerText = emoji;
-        cell.onclick = () => {
-          draftAvatar = emoji;
-          renderAvatarGrid();
-        };
-        grid.appendChild(cell);
-      });
-    }
-
-    // 공통: 금지어/무효 닉네임 감지 시 입력값·UI·localStorage를 즉시 Guest_로 강제 덮어쓰기
-    function forceReplaceNickname(reasonMessage) {
-      const fallback = generateGuestName();
-      // 1) 입력폼에 남아있는 값도 즉시 리셋 (모달이 열려 있으면 사용자에게 보임)
-      const nameInputEl = document.getElementById('profileNameInput');
-      if (nameInputEl) nameInputEl.value = fallback;
-      // 2) 로컬 상태 + localStorage 즉시 덮어쓰기
-      myName = fallback;
-      myAvatar = draftAvatar;
-      saveProfileToStorage(myName, myAvatar);
-      // 3) 상단 프로필 UI 즉시 갱신
+      myTrophies = data.trophies;
       updateTopBar();
-      // 4) 서버에도 교체된 이름 전송 (리더보드/상대방에게 Guest_로 보이도록)
-      socket.emit('setProfile', { name: myName, avatar: myAvatar });
-      fetchLeaderboard();
-      // 5) 경고 문구
-      if (reasonMessage) document.getElementById('statusMessage').innerText = reasonMessage;
-      return fallback;
-    }
-
-    function saveProfile() {
-      const rawInput = document.getElementById('profileNameInput').value;
-      const nameInput = rawInput.replace(/\s+/g, ''); // 공백 전부 제거
-
-      // 금지어 포함 → 경고창 + 입력값 삭제 즉시 Guest_ 덮어쓰기 (입력폼/UI/localStorage 동시)
-      if (containsForbiddenWord(nameInput)) {
-        alert('Your nickname contains a forbidden word. It will be replaced with a default name.');
-        forceReplaceNickname('⚠️ Nickname blocked (forbidden word). Replaced with a default name.');
-        closeProfileModal();
-        return;
-      }
-
-      // 유효하지 않음 (2~10자 초과/미달, <> 포함) → 동일하게 즉시 덮어쓰기
-      if (!isValidNickname(nameInput)) {
-        forceReplaceNickname('⚠️ Invalid nickname (2-10 chars, no < >). Replaced with a default name.');
-        closeProfileModal();
-        return;
-      }
-
-      // 로컬 상태 즉시 갱신
-      myName = nameInput;
-      myAvatar = draftAvatar;
-
-      // localStorage에 저장 (새로고침后에도 유지)
-      saveProfileToStorage(myName, myAvatar);
-
-      // 서버에 전송
-      socket.emit('setProfile', { name: myName, avatar: myAvatar });
-
-      // UI 즉시 반영
-      updateTopBar();
-      // 리더보드도 즉시 갱신 (내 이름이 반영되도록)
-      fetchLeaderboard();
-      closeProfileModal();
-    }
+    });
 
     function switchMatchKind(ranked, silent) {
       if (ranked && !rankedUnlocked) {
-        document.getElementById('statusMessage').innerText =
-          `🔒 Ranked unlocks after ${requiredUnlockWins} Casual wins. (${normalWins}/${requiredUnlockWins})`;
+        document.getElementById('statusMessage').innerText = `🔒 Ranked unlocks after ${requiredUnlockWins} Casual wins. (${normalWins}/${requiredUnlockWins})`;
         return;
       }
       isRanked = ranked;
@@ -842,7 +541,6 @@ function updateTopBar() {
       isCreatingPrivateRoom = false;
     }
 
-    // --- 비밀방 관련 함수 ---
     function startPrivateRoom() {
       isCreatingPrivateRoom = true;
       document.getElementById('statusMessage').innerText = 'Select duration for custom room';
@@ -851,10 +549,7 @@ function updateTopBar() {
 
     function joinPrivateRoom() {
       const code = document.getElementById('inviteCodeInput').value.toUpperCase().trim();
-      if (!code || code.length < 4) {
-        document.getElementById('statusMessage').innerText = 'Please enter a valid room code.';
-        return;
-      }
+      if (!code || code.length < 4) { document.getElementById('statusMessage').innerText = 'Please enter a valid room code.'; return; }
       socket.emit('joinRoom', { code });
       document.getElementById('statusMessage').innerText = 'Joining room...';
       document.getElementById('waitingControls').style.display = 'block';
@@ -878,11 +573,8 @@ function updateTopBar() {
     function copyInviteLink() {
       const url = window.location.origin + window.location.pathname + '?room=' + privateRoomCode;
       if (navigator.clipboard) {
-        navigator.clipboard.writeText(url).then(() => {
-          document.getElementById('statusMessage').innerText = '✅ Link copied!';
-        });
+        navigator.clipboard.writeText(url).then(() => { document.getElementById('statusMessage').innerText = '✅ Link copied!'; });
       } else {
-        // fallback
         const ta = document.createElement('textarea');
         ta.value = url; document.body.appendChild(ta);
         ta.select(); document.execCommand('copy'); document.body.removeChild(ta);
@@ -894,7 +586,6 @@ function updateTopBar() {
       document.getElementById('roomCodeModal').classList.remove('show');
     }
 
-    // URL 파라미터로 ?room=CODE 접속 시 자동 입장
     function checkUrlRoomParam() {
       const params = new URLSearchParams(window.location.search);
       const roomCode = params.get('room');
@@ -916,7 +607,6 @@ function updateTopBar() {
       document.getElementById('quoteDisplay').innerHTML = '';
       document.getElementById('quoteDisplay').style.transform = 'translateY(0px)';
       document.getElementById('matchupBar').classList.add('hidden-state');
-      // 상대방 커서 숨기기
       if (oppCaretEl) oppCaretEl.style.display = 'none';
     }
 
@@ -924,16 +614,12 @@ function updateTopBar() {
       resetGameState();
       currentMode = mode;
       currentDuration = mode === 'time' ? selectedDuration : null;
-
-      // 비밀방 만들기 모드이면 방 생성
       if (isCreatingPrivateRoom) {
         isCreatingPrivateRoom = false;
         socket.emit('createRoom', { mode, duration: currentDuration });
         return;
       }
-
       socket.emit('selectMode', { mode, duration: currentDuration, isRanked });
-
       document.getElementById('modeSelect').style.display = 'none';
       document.getElementById('typeTab').style.display = 'none';
       setLobbyVisible(false);
@@ -950,11 +636,9 @@ function updateTopBar() {
       setLobbyVisible(false);
       document.getElementById('title').innerText = "Finding opponent...";
       document.getElementById('waitingControls').style.display = 'block';
-
       socket.emit('selectMode', { mode: currentMode, duration: currentDuration, isRanked });
     }
 
-    // 매칭 대기 중 취소: 서버 대기열에서 제거하고 모드 선택 화면으로 복귀
     function cancelSearch() {
       socket.emit('cancelSearch');
       resetGameState();
@@ -969,11 +653,7 @@ function updateTopBar() {
       setLobbyVisible(true);
       document.getElementById('title').innerText = "Select Match Duration";
       document.getElementById('statusMessage').innerText = '';
-      applyUnlockStatus({
-        normalWins,
-        requiredWins: requiredUnlockWins,
-        rankedUnlocked
-      });
+      applyUnlockStatus({ normalWins, requiredWins: requiredUnlockWins, rankedUnlocked });
     }
 
     function renderQuote() {
@@ -985,15 +665,12 @@ function updateTopBar() {
         span.innerText = char;
         qd.appendChild(span);
       });
-
       myCaretEl = document.createElement('div');
       myCaretEl.className = 'caret';
       qd.appendChild(myCaretEl);
-
       oppCaretEl = document.createElement('div');
       oppCaretEl.className = 'caret opp-caret';
       qd.appendChild(oppCaretEl);
-
       positionCaret(myCaretEl, 0);
       updateViewportScroll(0);
     }
@@ -1011,21 +688,15 @@ function updateTopBar() {
       caretEl.style.display = 'block';
     }
 
-    // 현재 charIndex 가 위치한 줄(row)을 계산한다.
     function getRowForIndex(charIndex) {
       const spans = document.querySelectorAll('span.char');
       if (spans.length === 0) return 0;
       const idx = Math.min(Math.max(0, charIndex), spans.length - 1);
-      const target = spans[idx];
-      return Math.round(target.offsetTop / LINE_HEIGHT);
+      return Math.round(spans[idx].offsetTop / LINE_HEIGHT);
     }
 
-    // 내가 타이핑 중인 줄이 항상 뷰포트 맨 위에 오도록 quote-display 를 밀어올린다.
-    // (3줄짜리 뷰포트: 현재 줄 + 다음 두 줄이 항상 보임)
     function updateViewportScroll(row) {
-      const qd = document.getElementById('quoteDisplay');
-      const offset = Math.max(0, row) * LINE_HEIGHT;
-      qd.style.transform = `translateY(-${offset}px)`;
+      document.getElementById('quoteDisplay').style.transform = `translateY(-${Math.max(0, row) * LINE_HEIGHT}px)`;
     }
 
     function startCountdown() {
@@ -1038,7 +709,6 @@ function updateTopBar() {
           const ti = document.getElementById('typingInput');
           ti.disabled = false;
           ti.focus();
-          // 카운트다운이 끝나 타이핑이 시작되면 매치업 배너를 부드럽게 접어서 시야를 확보한다.
           document.getElementById('matchupBar').classList.add('hidden-state');
           startGameTimer();
         } else {
@@ -1057,10 +727,6 @@ function updateTopBar() {
       }, 200);
     }
 
-    document.getElementById('profileModalOverlay').addEventListener('click', (e) => {
-      if (e.target.id === 'profileModalOverlay') closeProfileModal();
-    });
-
     document.getElementById('reportModalOverlay').addEventListener('click', (e) => {
       if (e.target.id === 'reportModalOverlay') closeReportModal();
     });
@@ -1069,7 +735,6 @@ function updateTopBar() {
       if (!gameEnded) document.getElementById('typingInput').focus();
     });
 
-    // 글자로 입력되지 않는 기능키(Functional Keys) 목록
     const NON_TEXT_KEYS = new Set([
       'Shift','Control','Alt','Meta','CapsLock','Tab','Escape',
       'ScrollLock','NumLock','Pause',
@@ -1080,63 +745,28 @@ function updateTopBar() {
 
     document.getElementById('typingInput').addEventListener('keydown', (e) => {
       if (gameEnded) return;
-      // 글자로 입력되지 않는 키는 preventDefault로 input 이벤트가 생기지 않게 차단
-      if (NON_TEXT_KEYS.has(e.key)) {
-        e.preventDefault();
-        return;
-      }
-      // 방향키/기능키 중에 텍스트 삽입이 아예 없는 키도 차단
-      if (e.ctrlKey || e.altKey || e.metaKey) {
-        e.preventDefault();
-        return;
-      }
-      if (e.key.startsWith('Arrow') || e.key === 'Tab' || e.key === 'Escape' ||
-          e.key === 'Enter' && e.target !== document.getElementById('typingInput')) {
-        e.preventDefault();
-        return;
-      }
+      if (NON_TEXT_KEYS.has(e.key)) { e.preventDefault(); return; }
+      if (e.ctrlKey || e.altKey || e.metaKey) { e.preventDefault(); return; }
+      if (e.key.startsWith('Arrow') || e.key === 'Tab' || e.key === 'Escape') { e.preventDefault(); return; }
     });
 
     document.getElementById('typingInput').addEventListener('input', (e) => {
       if (gameEnded) return;
-      // IME 조합 중에는 무시
       if (e.isComposing) return;
-
       let val = e.target.value;
+      if (val.length > sampleText.length) { val = val.substring(0, sampleText.length); e.target.value = val; }
 
-      // 문장 전체 길이를 넘는 입력은 잘라낸다.
-      if (val.length > sampleText.length) {
-        val = val.substring(0, sampleText.length);
-        e.target.value = val;
-      }
-
-      // 현재 입력값 기준으로 남아있는 오타 수 재계산 (누적 아님)
       let currentErrors = 0;
-      for (let i = 0; i < val.length; i++) {
-        if (val[i] !== sampleText[i]) currentErrors++;
-      }
+      for (let i = 0; i < val.length; i++) { if (val[i] !== sampleText[i]) currentErrors++; }
 
-      // 기본 키 입력: 새로 추가된 글자 수만큼 totalTyped 누적 증가, 오타 발견 시 totalErrors 누적 증가
       if (val.length > prevVal.length) {
-        const addedCount = val.length - prevVal.length;
-        totalTyped += addedCount;
-        for (let i = prevVal.length; i < val.length; i++) {
-          if (val[i] !== sampleText[i]) totalErrors++;
-        }
-      }
-      // 백스페이스/삭제로 줄어든 경우: totalTyped는 누적 개념으로 감소시키지 않음
-      // (총 타이핑 횟수는 되돌리지 않음). currentErrors는 재계산 값이므로 totalErrors와는 다름.
-      else if (val.length < prevVal.length) {
-        // 백스페이스로 지웠더라도 이미 눌린 키로 인한 오타 누적은 유지
-        totalTyped += 0; // 변화 없음 (총 입력 시도 횟수는 유지)
+        totalTyped += val.length - prevVal.length;
+        for (let i = prevVal.length; i < val.length; i++) { if (val[i] !== sampleText[i]) totalErrors++; }
       }
       prevVal = val;
 
-      // 현재 화면 기준 유효 글자 수 (Net Correct Chars): 입력 글자 수 - 남아있는 오타 수
       const netCorrect = Math.max(0, val.length - currentErrors);
-
-      const spans = document.querySelectorAll('span.char');
-      spans.forEach((span, idx) => {
+      document.querySelectorAll('span.char').forEach((span, idx) => {
         const char = val[idx];
         if (char == null) span.className = 'char';
         else if (char === sampleText[idx]) span.className = 'char correct';
@@ -1146,65 +776,31 @@ function updateTopBar() {
       positionCaret(myCaretEl, val.length);
       updateViewportScroll(getRowForIndex(val.length));
 
-      // 누적 기준 정확도: totalTyped 대비 totalErrors (한 번 오타면 영원히 100% 불가)
-      const accuracy = totalTyped > 0
-        ? Math.max(0, Math.round(((totalTyped - totalErrors) / totalTyped) * 100))
-        : 100;
-
+      const accuracy = totalTyped > 0 ? Math.max(0, Math.round(((totalTyped - totalErrors) / totalTyped) * 100)) : 100;
       document.getElementById('accuracy').innerText = accuracy;
-
       const percent = (val.length === sampleText.length) ? 100 : Math.floor((val.length / sampleText.length) * 100);
 
-      // 서버에 누적 기준과 현재 netCorrect를 함께 전송
-      socket.emit('progress', {
-        percent,
-        accuracy,
-        charIndex: val.length,
-        netCorrect,
-        totalTyped,
-        totalErrors
-      });
+      socket.emit('progress', { percent, accuracy, charIndex: val.length, netCorrect, totalTyped, totalErrors });
     });
-
-    // 색상 hex 를 배지 배경용 rgba 로 변환
-    function hexToRgba(hex, alpha) {
-      const bigint = parseInt(hex.replace('#', ''), 16);
-      const r = (bigint >> 16) & 255, g = (bigint >> 8) & 255, b = bigint & 255;
-      return `rgba(${r}, ${g}, ${b}, ${alpha})`;
-    }
 
     // --- SPA View Switching ---
     let currentView = 'play';
     let currentLeaderboardTab = 'rank';
 
-    // 헤더 탭 + 로비 전체를 동시에 show/hide (in-game 시 사용)
     function setLobbyVisible(visible) {
       const lobby = document.getElementById('lobbyHeader');
       const tabs = document.getElementById('headerTabs');
-      if (visible) {
-        lobby.classList.remove('hidden');
-        tabs.style.display = '';
-      } else {
-        lobby.classList.add('hidden');
-        tabs.style.display = 'none';
-      }
+      if (visible) { lobby.classList.remove('hidden'); tabs.style.display = ''; }
+      else { lobby.classList.add('hidden'); tabs.style.display = 'none'; }
     }
 
     function switchView(view) {
       currentView = view;
-      // 탭 active 토글
-      document.querySelectorAll('.header-tab').forEach(btn => {
-        btn.classList.toggle('active', btn.dataset.view === view);
-      });
-      // 뷰 show/hide
+      document.querySelectorAll('.header-tab').forEach(btn => { btn.classList.toggle('active', btn.dataset.view === view); });
       document.getElementById('playView').classList.toggle('active', view === 'play');
       document.getElementById('rankView').classList.toggle('active', view === 'rank');
       document.getElementById('trophyView').classList.toggle('active', view === 'trophy');
-      // 리더보드 탭 전환 시 데이터 요청
-      if (view === 'rank' || view === 'trophy') {
-        currentLeaderboardTab = view;
-        fetchLeaderboard();
-      }
+      if (view === 'rank' || view === 'trophy') { currentLeaderboardTab = view; fetchLeaderboard(); }
     }
 
     function fetchLeaderboard() {
@@ -1212,19 +808,11 @@ function updateTopBar() {
       socket.emit('requestLeaderboard', { sortBy: currentLeaderboardTab });
     }
 
-    // 기존 switchLeaderboardTab 은 switchView 로 대체
-    function switchLeaderboardTab(sortBy) { switchView(sortBy); }
-
     socket.on('leaderboardData', (data) => {
-      // 어떤 탭의 리더보드인지에 따라 해당 요소에 렌더링
       const targetId = data.sortBy === 'rank' ? 'rankLeaderboard' : 'trophyLeaderboard';
       const list = document.getElementById(targetId);
       if (!list) return;
-      if (!data.entries || data.entries.length === 0) {
-        list.innerHTML = '<div class="lb-empty">No records yet.</div>';
-        return;
-      }
-
+      if (!data.entries || data.entries.length === 0) { list.innerHTML = '<div class="lb-empty">No records yet.</div>'; return; }
       let html = '';
       data.entries.forEach((entry, idx) => {
         const rank = idx + 1;
@@ -1232,43 +820,22 @@ function updateTopBar() {
         const rankDisplay = rank <= 3 ? `${medals[rank-1]} #${rank}` : `#${rank}`;
         const rowClass = 'lb-row' + (entry.isMe ? ' me' : '') + (rank === 1 ? ' top1' : rank === 2 ? ' top2' : rank === 3 ? ' top3' : '');
         const score = data.sortBy === 'rank' ? entry.rating : entry.trophies;
-        html += `<div class="${rowClass}">
-          <span class="lb-rank">${rankDisplay}</span>
-          <span class="lb-avatar">${entry.avatar}</span>
-          <span class="lb-name">${entry.name}</span>
-          <span class="lb-score">${score}</span>
-        </div>`;
+        html += `<div class="${rowClass}"><span class="lb-rank">${rankDisplay}</span><span class="lb-avatar">${entry.avatar}</span><span class="lb-name">${entry.name}</span><span class="lb-score">${score}</span></div>`;
       });
       list.innerHTML = html;
     });
 
-    // 초기 리더보드 로드는 connect 핸들러의 setProfile ACK 콜백에서 처리됨.
-
-    // URL 파라미터 체크 (비밀방 자동 입장)
     checkUrlRoomParam();
 
-    // 경쟁전 시작 시 나 vs 상대 프로필(이름/레이팅/티어) 배너를 채워서 보여준다.
     function renderMatchupBar(data) {
-  const myAvatarEmoji = data.myAvatar || '😀';
-  const oppAvatarEmoji = data.opponentAvatar || '👤';
-
-  const myAvatarEl = document.getElementById('myAvatar');
-  myAvatarEl.innerText = myAvatarEmoji;
-  
-  const oppAvatarEl = document.getElementById('oppAvatar');
-  oppAvatarEl.innerText = oppAvatarEmoji;
-
-  document.getElementById('myMatchupName').innerText = data.myName || 'Me';
-  document.getElementById('oppMatchupName').innerText = data.opponentName || 'Opponent';
-
-  const myTierEl = document.getElementById('myTierBadge');
-  myTierEl.innerText = isRanked ? `MMR ${data.myRating}` : `🏆 ${data.myTrophies || 0}`;
-
-  const oppTierEl = document.getElementById('oppTierBadge');
-  oppTierEl.innerText = isRanked ? `MMR ${data.opponentRating}` : `🏆 ${data.opponentTrophies || 0}`;
-
-  document.getElementById('matchupBar').classList.remove('hidden-state');
-}
+      document.getElementById('myAvatar').innerText = data.myAvatar || '😀';
+      document.getElementById('oppAvatar').innerText = data.opponentAvatar || '👤';
+      document.getElementById('myMatchupName').innerText = data.myName || 'Me';
+      document.getElementById('oppMatchupName').innerText = data.opponentName || 'Opponent';
+      document.getElementById('myTierBadge').innerText = isRanked ? `MMR ${data.myRating}` : `🏆 ${data.myTrophies || 0}`;
+      document.getElementById('oppTierBadge').innerText = isRanked ? `MMR ${data.opponentRating}` : `🏆 ${data.opponentTrophies || 0}`;
+      document.getElementById('matchupBar').classList.remove('hidden-state');
+    }
 
     socket.on('gameStart', (data) => {
       resetGameState();
@@ -1276,37 +843,27 @@ function updateTopBar() {
       sampleText = data.text;
       duration = data.duration;
       serverStartTime = data.startTime;
-
       document.getElementById('modeSelect').style.display = 'none';
       document.getElementById('waitingControls').style.display = 'none';
       document.getElementById('gameArea').style.display = 'block';
       setLobbyVisible(false);
       document.getElementById('modeBadge').innerText = `${data.isRanked ? '[Ranked] ' : '[Casual] '}${duration}s`;
-
       document.getElementById('statusMessage').innerText = "Opponent found!";
       document.getElementById('resultBanner').innerHTML = '';
       document.getElementById('restartRow').style.display = 'none';
-
-      // 매치업(상대 프로필) 배너는 일반전/경쟁전 모두 표시한다.
-      if (data.myTier && data.opponentTier) {
-        renderMatchupBar(data);
-      }
-
+      if (data.myTier && data.opponentTier) renderMatchupBar(data);
       renderQuote();
       startCountdown();
     });
 
     socket.on('opponentProgress', (data) => {
-      // 상대방 파란색 커서를 현재 글자 위치로 이동
       if (oppCaretEl) positionCaret(oppCaretEl, data.charIndex || 0);
     });
 
-    // --- 비밀방 이벤트 핸들러 ---
     socket.on('roomCreated', (data) => {
       privateRoomCode = data.code;
       document.getElementById('roomCodeDisplay').innerText = data.code;
       document.getElementById('roomCodeModal').classList.add('show');
-      // 대기 화면 표시
       document.getElementById('roomWaitingCode').innerText = data.code;
       document.getElementById('roomWaiting').style.display = 'block';
       document.getElementById('modeSelect').style.display = 'none';
@@ -1335,12 +892,7 @@ function updateTopBar() {
       document.getElementById('gameArea').style.display = 'block';
       document.getElementById('modeSelect').style.display = 'none';
       document.getElementById('typeTab').style.display = 'none';
-      const cd = setInterval(() => {
-        sec--;
-        if (sec <= 0) { clearInterval(cd); } else {
-          document.getElementById('title').innerText = `Starting in ${sec}...`;
-        }
-      }, 1000);
+      const cd = setInterval(() => { sec--; if (sec <= 0) clearInterval(cd); else document.getElementById('title').innerText = `Starting in ${sec}...`; }, 1000);
     });
 
     socket.on('roomError', (data) => {
@@ -1355,21 +907,13 @@ function updateTopBar() {
     });
 
     function renderCompareCard(label, colClass, stats) {
-      return `
-        <div class="dash-col ${colClass}">
-          <h4>${label}</h4>
-          <div class="dash-stat-row"><span class="k">Net Chars</span><span class="v">${stats.netCorrect}</span></div>
-          <div class="dash-stat-row"><span class="k">Accuracy</span><span class="v">${stats.accuracy}%</span></div>
-        </div>
-      `;
+      return `<div class="dash-col ${colClass}"><h4>${label}</h4><div class="dash-stat-row"><span class="k">Net Chars</span><span class="v">${stats.netCorrect}</span></div><div class="dash-stat-row"><span class="k">Accuracy</span><span class="v">${stats.accuracy}%</span></div></div>`;
     }
 
     socket.on('gameOver', (data) => {
       gameEnded = true;
       clearInterval(gameTimerInterval);
       document.getElementById('typingInput').disabled = true;
-
-      // 신고용 데이터 저장
       lastOpponentId = data.opponentId || null;
       lastRoomId = data.roomId || null;
       lastMatchStats = { myStats: data.myStats, opponentStats: data.opponentStats, result: data.result, duration: duration };
@@ -1381,19 +925,16 @@ function updateTopBar() {
       if (data.ratingData) {
         myRating = data.ratingData.new;
         const diff = data.ratingData.diff;
-        const sign = diff >= 0 ? '+' : '';
-        changeHtml = `<div class="rating-change">MMR Change: ${sign}${diff} (${data.ratingData.new})</div>`;
+        changeHtml = `<div class="rating-change">MMR Change: ${diff >= 0 ? '+' : ''}${diff} (${data.ratingData.new})</div>`;
       }
       if (data.trophyData) {
         myTrophies = data.trophyData.new;
         if (!data.ratingData) {
           const diff = data.trophyData.diff;
-          const sign = diff >= 0 ? '+' : '';
-          changeHtml = `<div class="rating-change" style="color:var(--mt-yellow);">🏆 Trophy Change: ${sign}${diff} (${data.trophyData.new})</div>`;
+          changeHtml = `<div class="rating-change" style="color:var(--mt-yellow);">🏆 Trophy Change: ${diff >= 0 ? '+' : ''}${diff} (${data.trophyData.new})</div>`;
         }
       }
       updateTopBar();
-
       applyUnlockStatus(data.unlock, { justUnlocked: !!data.justUnlocked, keepPanel: true });
 
       const matchKey = lastRoomId || '';

@@ -135,8 +135,9 @@ function buildPlayerTags(playerId, normalWins, topRankList, topWinId) {
 
 // 기존 닉네임에 붙은 태그를 모두 떼어내고, 새로 받은 랭크/칭호 태그를 붙여 반환한다.
 function appendDynamicTag(baseNick, socketId, rankTag) {
-  if (!baseNick) return rankTag.trim();
-  const coreName = (baseNick || '').replace(/\[[^\]]*\]\s*/g, '').trim();
+  const base = baseNick || '';
+  // 이미 서버 측 태그가 붙은 닉네임이라면 태그를 전부 떼어내고 새로 붙인다.
+  const coreName = base.replace(/\[[^\]]*\]\s*/g, '').trim();
   if (!coreName) return rankTag.trim();
   return `${coreName} ${rankTag}`.trim();
 }
@@ -306,22 +307,9 @@ function removeFromWaitingQueues(socket) {
   if (rIdx > -1) waitingRankedPlayers.splice(rIdx, 1);
 }
 
-// 닉네임 검증: 앞뒤 공백 제거, 꺾쇠괄호 제거(간단한 XSS 방지), 길이 제한 + 금지어 검사.
-// 조건을 만족하지 못하면 null을 반환해 호출부에서 기존 값을 유지하도록 한다.
-// 금지어가 포함되어 있어도 null을 반환한다 (호출부에서 Guest_숫자로 강제 교체 처리).
-function sanitizeNickname(raw) {
-  if (typeof raw !== 'string') return null;
-  const trimmed = raw.trim().replace(/[<>]/g, '');
-  if (trimmed.length < NICKNAME_MIN_LEN || trimmed.length > NICKNAME_MAX_LEN) return null;
-  if (containsForbiddenWord(trimmed)) return null;
-  return trimmed;
-}
-
-// 아바타는 화이트리스트에 있는 값만 허용한다.
-function sanitizeAvatar(raw) {
-  return ALLOWED_AVATARS.includes(raw) ? raw : null;
-}
-
+// 닉네임/아바타 사용자 입력 검증 함수는 더 이상 사용하지 않는다.
+// 닉네임은 서버 접속 순번 기반 Player #번호로만 부여하고,
+// 아바타는 허용되는 이모지 화이트리스트에 없으면 기본값으로 처리한다.
 function sanitizePlayerId(raw) {
   if (typeof raw !== 'string') return null;
   const id = raw.trim();
@@ -560,13 +548,13 @@ io.on('connection', (socket) => {
   runSeasonResets();
 
   userRatings[socket.id] = userRatings[socket.id] || 1000;
-  // 소켓 연결 시 기본 닉네임도 검증 함수를 거쳐 부여 (Guest_숫자 형식 강제)
-  userNames[socket.id] = userNames[socket.id] || generateGuestNickname();
+  // 닉네임 입력 UI를 완전히 제거했으므로, 서버 접속 순번 기반으로만 Player #번호 닉네임을 부여한다.
+  userNames[socket.id] = userNames[socket.id] || generatePlayerNick();
   userAvatars[socket.id] = userAvatars[socket.id] || DEFAULT_AVATAR;
   userNormalWins[socket.id] = userNormalWins[socket.id] || 0;
-  userTrophies[socket.id] = userTrophies[socket.id] || 0; // 초기 트로피 설정
+  userTrophies[socket.id] = userTrophies[socket.id] || 0;
 
-  // 현재 전역 통계 기준 랭킹/칭호 태그를 닉네임에 붙여 연결하고, 클라이언트에 전달한다.
+  // 현재 전역 통계 기준 랭킹/칭호 태그를 닉네임에 자동으로 결합한다.
   const rankTag = buildRankTagForSocket(socket.id);
   userNames[socket.id] = appendDynamicTag(userNames[socket.id], socket.id, rankTag);
 
@@ -577,7 +565,8 @@ io.on('connection', (socket) => {
     avatar: userAvatars[socket.id],
     allowedAvatars: ALLOWED_AVATARS,
     ...unlockPayload(socket),
-    rankTag: rankTag
+    rankTag: rankTag,
+    isPlayerNumberMode: true
   });
 
   // 새로고침해도 같은 브라우저면 일반전 승수를 이어가기 위한 계정 키.
@@ -597,35 +586,6 @@ io.on('connection', (socket) => {
     socket.emit('trophyUpdate', { trophies: userTrophies[socket.id] });
   });
 
-  // 프로필(닉네임/아바타) 변경 요청. 매칭 대기 중이든 평상시든 언제나 허용하되,
-  // 검증 실패(길이 위반, 금지어 포함)한 닉네임은 Guest_숫자로 강제 교체한다.
-  socket.on('setProfile', (data, ack) => {
-    data = data || {};
-    let newName = sanitizeNickname(data.name);
-    let nameRejected = false;
-
-    // 닉네임이 제출되었는데 검증 실패 → 금지어/길이 위반이므로 Guest_숫자로 강제 교체
-    if (typeof data.name === 'string' && data.name.trim() && !newName) {
-      newName = generateGuestNickname();
-      nameRejected = true;
-    }
-
-    const newAvatar = sanitizeAvatar(data.avatar);
-
-    if (newName) userNames[socket.id] = newName;
-    if (newAvatar) userAvatars[socket.id] = newAvatar;
-
-    socket.emit('profileUpdated', {
-      name: userNames[socket.id],
-      avatar: userAvatars[socket.id],
-      nameAccepted: !nameRejected && !!sanitizeNickname(data.name),
-      avatarAccepted: !!newAvatar
-    });
-
-    // 클라이언트에서 ACK 콜백을 전달하면 프로필 처리 완료를 알린다.
-    // 이를 이용해 리더보드 요청 순서를 보장할 수 있다.
-    if (typeof ack === 'function') ack();
-  });
 
   socket.on('selectMode', (data) => {
     data = data || {};
