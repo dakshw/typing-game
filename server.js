@@ -108,7 +108,41 @@ const accountRatings = {}; // { playerId: rating } — 재접속 시 레이팅 �
 const ALLOWED_AVATARS = ['😀', '😎', '🤖', '🐱', '🐶', '🦊', '🐼', '🐵', '🔥', '⚡', '🎯', '🚀'];
 const DEFAULT_AVATAR = ALLOWED_AVATARS[0];
 const NICKNAME_MIN_LEN = 2;
-const NICKNAME_MAX_LEN = 12;
+const NICKNAME_MAX_LEN = 10;
+
+// --- 닉네임 금지어 목록 (서버 레벨 검열) ---
+// 비속어 / 인종차별 / 성적 단어. 소문자 기준으로 부분 일치 검사한다.
+const forbiddenWords = [
+  'sex', 'nigger', 'nigga', 'fuck', 'shit', 'bitch', 'asshole', 'cunt',
+  'bastard', 'damn', 'faggot', 'nazi', 'rape', 'slut', 'whore',
+  'dick', 'penis', 'vagina'
+];
+
+// 금지어 포함 여부 검사 (대소문자 무시)
+function containsForbiddenWord(name) {
+  const lower = (name || '').toLowerCase();
+  return forbiddenWords.some(word => lower.includes(word));
+}
+
+// 임의 기본 닉네임 생성: 'Guest_' + 4자리 숫자
+function generateGuestNickname() {
+  return 'Guest_' + Math.floor(1000 + Math.random() * 9000);
+}
+
+// 닉네임 강제 검증/변환:
+// - 없거나 빈 문자열 → Guest_숫자
+// - 금지어 포함 → Guest_숫자 (강제 교체)
+// - 공백 제외 2자 미만 / 10자 초과 → Guest_숫자 (강제 교체)
+// - 유효하면 앞뒤 공백 제거 + 꺾쇠괄호 제거한 값 반환
+function enforceNickname(raw) {
+  if (typeof raw !== 'string') return generateGuestNickname();
+  const trimmed = raw.trim().replace(/[<>]/g, '');
+  if (!trimmed) return generateGuestNickname();
+  if (containsForbiddenWord(trimmed)) return generateGuestNickname();
+  const noSpace = trimmed.replace(/\s+/g, '');
+  if (noSpace.length < NICKNAME_MIN_LEN || noSpace.length > NICKNAME_MAX_LEN) return generateGuestNickname();
+  return trimmed;
+}
 const waitingRankedPlayers = [];
 const rooms = {};
 const customRooms = {}; // { CODE: { mode, duration, isRanked, players: [socket] } }
@@ -243,12 +277,14 @@ function removeFromWaitingQueues(socket) {
   if (rIdx > -1) waitingRankedPlayers.splice(rIdx, 1);
 }
 
-// 닉네임 검증: 앞뒤 공백 제거, 꺾쇠괄호 제거(간단한 XSS 방지), 길이 제한.
+// 닉네임 검증: 앞뒤 공백 제거, 꺾쇠괄호 제거(간단한 XSS 방지), 길이 제한 + 금지어 검사.
 // 조건을 만족하지 못하면 null을 반환해 호출부에서 기존 값을 유지하도록 한다.
+// 금지어가 포함되어 있어도 null을 반환한다 (호출부에서 Guest_숫자로 강제 교체 처리).
 function sanitizeNickname(raw) {
   if (typeof raw !== 'string') return null;
   const trimmed = raw.trim().replace(/[<>]/g, '');
   if (trimmed.length < NICKNAME_MIN_LEN || trimmed.length > NICKNAME_MAX_LEN) return null;
+  if (containsForbiddenWord(trimmed)) return null;
   return trimmed;
 }
 
@@ -495,7 +531,8 @@ io.on('connection', (socket) => {
   runSeasonResets();
 
   userRatings[socket.id] = userRatings[socket.id] || 1000;
-  userNames[socket.id] = userNames[socket.id] || `Guest${Math.floor(1000 + Math.random() * 9000)}`;
+  // 소켓 연결 시 기본 닉네임도 검증 함수를 거쳐 부여 (Guest_숫자 형식 강제)
+  userNames[socket.id] = userNames[socket.id] || generateGuestNickname();
   userAvatars[socket.id] = userAvatars[socket.id] || DEFAULT_AVATAR;
   userNormalWins[socket.id] = userNormalWins[socket.id] || 0;
   userTrophies[socket.id] = userTrophies[socket.id] || 0; // 초기 트로피 설정
@@ -527,10 +564,18 @@ io.on('connection', (socket) => {
   });
 
   // 프로필(닉네임/아바타) 변경 요청. 매칭 대기 중이든 평상시든 언제나 허용하되,
-  // 검증 실패한 필드는 무시하고 기존 값을 유지한다.
+  // 검증 실패(길이 위반, 금지어 포함)한 닉네임은 Guest_숫자로 강제 교체한다.
   socket.on('setProfile', (data, ack) => {
     data = data || {};
-    const newName = sanitizeNickname(data.name);
+    let newName = sanitizeNickname(data.name);
+    let nameRejected = false;
+
+    // 닉네임이 제출되었는데 검증 실패 → 금지어/길이 위반이므로 Guest_숫자로 강제 교체
+    if (typeof data.name === 'string' && data.name.trim() && !newName) {
+      newName = generateGuestNickname();
+      nameRejected = true;
+    }
+
     const newAvatar = sanitizeAvatar(data.avatar);
 
     if (newName) userNames[socket.id] = newName;
@@ -539,7 +584,7 @@ io.on('connection', (socket) => {
     socket.emit('profileUpdated', {
       name: userNames[socket.id],
       avatar: userAvatars[socket.id],
-      nameAccepted: !!newName,
+      nameAccepted: !nameRejected && !!sanitizeNickname(data.name),
       avatarAccepted: !!newAvatar
     });
 

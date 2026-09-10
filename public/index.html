@@ -390,8 +390,8 @@
       <h3>Profile Settings</h3>
 
       <label class="modal-label">Nickname</label>
-      <input type="text" class="modal-input" id="profileNameInput" maxlength="12" placeholder="Enter nickname (2-12 chars)">
-      <div class="modal-hint">2-12 characters, special chars &lt; &gt; are not allowed.</div>
+      <input type="text" class="modal-input" id="profileNameInput" maxlength="10" placeholder="Enter nickname (2-10 chars)">
+      <div class="modal-hint">2-10 characters, spaces removed. Forbidden words are blocked.</div>
 
       <label class="modal-label">Avatar</label>
       <div class="avatar-grid" id="avatarGrid"></div>
@@ -704,16 +704,59 @@ function updateTopBar() {
       });
     }
 
-    function saveProfile() {
-      const nameInput = document.getElementById('profileNameInput').value.trim();
+    // --- 닉네임 검열: 금지어 목록 (소문자 기준 부분 일치) ---
+    const FORBIDDEN_WORDS = [
+      'fuck','shit','bitch','cunt','asshole','bastard','damn',
+      'nigger','nigga','faggot','nazi','rape',
+      'slut','whore','dick','penis','vagina'
+    ];
 
-      // 클라이언트 측 유효성 검사
-      if (nameInput.length < 2 || nameInput.length > 12) {
-        document.getElementById('statusMessage').innerText = 'Nickname must be 2-12 characters.';
+    function generateGuestName() {
+      return 'Guest_' + Math.floor(1000 + Math.random() * 9000);
+    }
+
+    function containsForbiddenWord(name) {
+      const lower = (name || '').toLowerCase();
+      return FORBIDDEN_WORDS.some(w => lower.includes(w));
+    }
+
+    // 공백 제거 후 2~10자, <> 금지, 금지어 포함 금지
+    function isValidNickname(raw) {
+      const trimmed = (raw || '').replace(/\s+/g, '');
+      if (trimmed.length < 2 || trimmed.length > 10) return false;
+      if (/[<>]/.test(trimmed)) return false;
+      if (containsForbiddenWord(trimmed)) return false;
+      return true;
+    }
+
+    function saveProfile() {
+      const rawInput = document.getElementById('profileNameInput').value;
+      const nameInput = rawInput.replace(/\s+/g, ''); // 공백 전부 제거
+
+      // 금지어 포함 → 경고창 + 변경 차단 후 기본 닉네임(Guest_숫자)으로 자동 대체
+      if (containsForbiddenWord(nameInput)) {
+        alert('Your nickname contains a forbidden word. It will be replaced with a default name.');
+        myName = generateGuestName();
+        myAvatar = draftAvatar;
+        saveProfileToStorage(myName, myAvatar);
+        socket.emit('setProfile', { name: myName, avatar: myAvatar });
+        updateTopBar();
+        fetchLeaderboard();
+        closeProfileModal();
+        document.getElementById('statusMessage').innerText = '⚠️ Nickname blocked (forbidden word). Replaced with a default name.';
         return;
       }
-      if (/[<>]/.test(nameInput)) {
-        document.getElementById('statusMessage').innerText = 'Nickname cannot contain < or >.';
+
+      // 유효하지 않음 (2~10자 초과/미달, <> 포함) → 기본 닉네임으로 자동 대체
+      if (!isValidNickname(nameInput)) {
+        myName = generateGuestName();
+        myAvatar = draftAvatar;
+        saveProfileToStorage(myName, myAvatar);
+        socket.emit('setProfile', { name: myName, avatar: myAvatar });
+        updateTopBar();
+        fetchLeaderboard();
+        closeProfileModal();
+        document.getElementById('statusMessage').innerText = '⚠️ Invalid nickname (2-10 chars, no < >). Replaced with a default name.';
         return;
       }
 
@@ -995,6 +1038,10 @@ function updateTopBar() {
         return;
       }
       // 방향키/기능키 중에 텍스트 삽입이 아예 없는 키도 차단
+      if (e.ctrlKey || e.altKey || e.metaKey) {
+        e.preventDefault();
+        return;
+      }
       if (e.key.startsWith('Arrow') || e.key === 'Tab' || e.key === 'Escape' ||
           e.key === 'Enter' && e.target !== document.getElementById('typingInput')) {
         e.preventDefault();
@@ -1262,8 +1309,9 @@ function updateTopBar() {
     function renderCompareCard(label, colClass, stats) {
       return `
         <div class="dash-col ${colClass}">
-          <h4>${label}</h4>           <div class="dash-stat-row"><span class="k">Accuracy</span><span class="v">${stats.accuracy}%</span></div>
-           <div class="dash-stat-row"><span class="k">Net Chars</span><span class="v">${stats.netCorrect}</span></div>
+          <h4>${label}</h4>
+          <div class="dash-stat-row"><span class="k">Net Chars</span><span class="v">${stats.netCorrect}</span></div>
+          <div class="dash-stat-row"><span class="k">Accuracy</span><span class="v">${stats.accuracy}%</span></div>
         </div>
       `;
     }
@@ -1313,8 +1361,9 @@ function updateTopBar() {
         </div>
         ${changeHtml}
         <div class="dash-main">
-          <div class="dash-primary">             <div class="dash-value">${data.myStats.netCorrect}</div>
-             <div class="dash-label">Final Score (Net Chars)</div>
+          <div class="dash-primary">
+            <div class="dash-value">${data.myStats.netCorrect}</div>
+            <div class="dash-label">Final Score (Net Chars)</div>
           </div>
         </div>
         <div class="dash-compare">
