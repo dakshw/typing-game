@@ -223,7 +223,10 @@
       <h2 id="title">Select Match Duration</h2>
       <div class="status-message" id="statusMessage"></div>
       <div class="waiting-controls" id="waitingControls" style="display:none; margin-bottom: 14px;">
-        <button class="btn-restart btn-secondary" onclick="cancelSearch()">✕ Cancel</button>
+        <div style="display:flex; gap:10px; justify-content:center;">
+          <button class="btn-restart" id="enterPracticeBtn" onclick="enterSoloPractice()">🎯 Enter Solo Practice</button>
+          <button class="btn-restart btn-secondary" onclick="cancelSearch()">✕ Cancel Queue</button>
+        </div>
       </div>
 
       <div class="mode-select" id="modeSelect">
@@ -671,8 +674,8 @@
       setLobbyVisible(false);
       document.getElementById('title').innerText = "Finding opponent...";
       document.getElementById('statusMessage').innerText = isRanked
-        ? "Searching for a similar rank... (Solo Practice starts in 5s)"
-        : "Looking for an opponent... (Solo Practice starts in 5s)";
+        ? "Searching for a similar rank..."
+        : "Looking for an opponent...";
       document.getElementById('waitingControls').style.display = 'block';
     }
 
@@ -683,12 +686,19 @@
       document.getElementById('restartRow').style.display = 'none';
       setLobbyVisible(false);
       document.getElementById('title').innerText = "Finding opponent...";
+      document.getElementById('statusMessage').innerText = isRanked
+        ? "Searching for a similar rank..."
+        : "Looking for an opponent...";
       document.getElementById('waitingControls').style.display = 'block';
       socket.emit('selectMode', { mode: currentMode, duration: currentDuration, isRanked });
     }
 
     function cancelSearch() {
       socket.emit('cancelSearch');
+      isSoloPractice = false;
+      practiceChunksTyped = 0;
+      const enterBtn = document.getElementById('enterPracticeBtn');
+      if (enterBtn) { enterBtn.disabled = false; enterBtn.innerText = '🎯 Enter Solo Practice'; }
       resetGameState();
       document.getElementById('waitingControls').style.display = 'none';
       document.getElementById('gameArea').style.display = 'none';
@@ -903,6 +913,8 @@
       isSoloPractice = false;
       practiceChunksTyped = 0;
       document.getElementById('timer').parentElement.style.display = '';
+      const enterBtn = document.getElementById('enterPracticeBtn');
+      if (enterBtn) { enterBtn.disabled = false; enterBtn.innerText = '🎯 Enter Solo Practice'; }
       currentMode = data.mode;
       sampleText = data.text;
       duration = data.duration;
@@ -1043,6 +1055,8 @@
       totalTyped = 0;
       totalErrors = 0;
       prevVal = "";
+      document.getElementById('enterPracticeBtn').disabled = true;
+      document.getElementById('enterPracticeBtn').innerText = '🎯 Practicing... (match continues in background)';
 
       document.getElementById('modeSelect').style.display = 'none';
       document.getElementById('waitingControls').style.display = 'none';
@@ -1068,10 +1082,18 @@
       socket.emit('requestPracticeText');
     }
 
-    // Exit Practice — 연습 종료 후 대기실로 복귀 (백그라운드 매칭은 서버에서 계속됨)
+    // [Enter Solo Practice] — 매칭 대기를 유지한 채 시간 제한 없는 연습 화면으로 즉시 진입
+    function enterSoloPractice() {
+      if (isSoloPractice) return;
+      socket.emit('requestSoloPractice');
+    }
+
+    // Exit Practice — 연습 종료 후 대기 화면으로 복귀 (매칭은 백그라운드에서 계속 진행됨)
     function exitPractice() {
-      gameEnded = true;
+      socket.emit('exitPractice');
       isSoloPractice = false;
+      practiceChunksTyped = 0;
+      gameEnded = true;
       document.getElementById('typingInput').disabled = true;
       document.getElementById('gameArea').style.display = 'none';
       document.getElementById('practiceExitRow').style.display = 'none';
@@ -1079,11 +1101,9 @@
       document.getElementById('resultBanner').innerHTML = '';
       document.getElementById('resultBanner').className = 'result-banner';
       document.getElementById('restartRow').style.display = 'none';
-      backToMainModes();
-      document.getElementById('modeSelect').style.display = 'flex';
-      document.getElementById('typeTab').style.display = 'flex';
-      setLobbyVisible(true);
-      document.getElementById('title').innerText = 'Select Match Duration';
+      document.getElementById('waitingControls').style.display = 'block';
+      setLobbyVisible(false);
+      document.getElementById('title').innerText = 'Finding opponent...';
       document.getElementById('statusMessage').innerText = 'Still searching for an opponent in background...';
     }
 
@@ -1094,6 +1114,14 @@
       renderQuote();
       document.getElementById('typingInput').disabled = false;
       document.getElementById('typingInput').focus();
+    });
+
+    // 연습 종료 시 [Enter Solo Practice] 버튼 상태 복원
+    socket.on('practiceEnded', () => {
+      isSoloPractice = false;
+      practiceChunksTyped = 0;
+      const btn = document.getElementById('enterPracticeBtn');
+      if (btn) { btn.disabled = false; btn.innerText = '🎯 Enter Solo Practice'; }
     });
 
     socket.on('opponentLeft', (data) => {

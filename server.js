@@ -283,7 +283,6 @@ function calculateNewRatings(winnerRating, loserRating) {
 
 // 매칭 대기열(일반전/경쟁전)에서 해당 소켓을 제거한다. cancelSearch, disconnect 양쪽에서 재사용.
 function removeFromWaitingQueues(socket) {
-  clearPracticeFallbackTimer(socket.id);
   delete soloPracticeSessions[socket.id];
   Object.keys(waitingNormalPlayers).forEach((k) => {
     if (waitingNormalPlayers[k] === socket) delete waitingNormalPlayers[k];
@@ -293,43 +292,14 @@ function removeFromWaitingQueues(socket) {
 }
 
 // --- 솔로 연습 모드 (Solo Practice Mode) ---
-// 매칭 대기 5초 초과 시 시간 제한 없는 솔로 연습 모드로 자동 전환한다.
-// 유저는 대기열에 그대로 남아 있어, 연습 중에 실제 유저 매칭이 성사되면 즉시 대전으로 전환된다.
-const PRACTICE_FALLBACK_DELAY_MS = 5000;
+// 유저가 [Enter Solo Practice] 버튼을 직접 눌렀을 때만 진입한다 (자동 카운트다운 없음).
+// 대기열은 그대로 유지되므로, 연습 중에도 실제 유저 매칭이 성사되면 즉시 대전으로 전환된다.
 const PRACTICE_TEXT_DURATION = 60; // 연습 텍스트 청크 길이 기준 (분당 단어 수 환산용)
 
-const practiceTimers = {};       // { socketId: timeoutId }
 const soloPracticeSessions = {}; // { socketId: { text } }
 
-function clearPracticeFallbackTimer(socketId) {
-  if (practiceTimers[socketId]) {
-    clearTimeout(practiceTimers[socketId]);
-    delete practiceTimers[socketId];
-  }
-}
-
-// 대기열 등록 후 5초 내 실제 유저 매칭에 실패하면 솔로 연습 텍스트를 내려준다.
-// 대기열에서는 제거하지 않는다 — 백그라운드 매칭은 계속 진행된다.
-function schedulePracticeFallback(socket) {
-  clearPracticeFallbackTimer(socket.id);
-  practiceTimers[socket.id] = setTimeout(() => {
-    delete practiceTimers[socket.id];
-    if (!socket.connected) return;
-    // 이미 매칭이 성사됐거나 연습 세션이 있으면 아무것도 하지 않는다.
-    const stillWaiting =
-      Object.values(waitingNormalPlayers).includes(socket) ||
-      waitingRankedPlayers.some((p) => p.socket === socket);
-    if (!stillWaiting || soloPracticeSessions[socket.id]) return;
-    const text = generateUniqueText('practice', PRACTICE_TEXT_DURATION, socket.data.lastText || '');
-    socket.data.lastText = text;
-    soloPracticeSessions[socket.id] = { text };
-    socket.emit('soloPracticeStart', { text });
-  }, PRACTICE_FALLBACK_DELAY_MS);
-}
-
-// 실제 유저와 매칭 성사 시 연습 타이머/세션을 정리한다.
+// 매칭 성사/취소/접속 종료 시 연습 세션을 정리한다.
 function clearPracticeSession(socketId) {
-  clearPracticeFallbackTimer(socketId);
   delete soloPracticeSessions[socketId];
 }
 
@@ -662,8 +632,6 @@ io.on('connection', (socket) => {
       } else {
         waitingRankedPlayers.push({ socket, rating: myRating, mode, duration });
         socket.emit('waiting', { isRanked: true });
-        // 5초 내 매칭 실패 시 시간 제한 없는 솔로 연습 모드로 자동 전환 (대기열 유지)
-        schedulePracticeFallback(socket);
       }
     } else {
       const matchKey = `time_${duration}`;
@@ -677,8 +645,6 @@ io.on('connection', (socket) => {
       } else {
         waitingNormalPlayers[matchKey] = socket;
         socket.emit('waiting', { isRanked: false });
-        // 5초 내 매칭 실패 시 시간 제한 없는 솔로 연습 모드로 자동 전환 (대기열 유지)
-        schedulePracticeFallback(socket);
       }
     }
   });
@@ -899,6 +865,14 @@ io.on('connection', (socket) => {
   });
 
   // --- 솔로 연습 모드 ---
+  // 유저가 [Enter Solo Practice] 버튼을 눌렀을 때 호출된다. 대기열은 유지된다.
+  socket.on('requestSoloPractice', () => {
+    const text = generateUniqueText('practice', PRACTICE_TEXT_DURATION, socket.data.lastText || '');
+    socket.data.lastText = text;
+    soloPracticeSessions[socket.id] = { text };
+    socket.emit('soloPracticeStart', { text });
+  });
+
   // 연습 중에도 대기열에 남아 있어 실제 유저 매칭 성사 시 gameStart가 즉시 발송되어
   // 클라이언트가 자연스럽게 대전 화면으로 전환된다.
   socket.on('requestPracticeText', () => {
@@ -912,6 +886,7 @@ io.on('connection', (socket) => {
 
   socket.on('exitPractice', () => {
     clearPracticeSession(socket.id);
+    socket.emit('practiceEnded');
   });
 
   socket.on('cancelSearch', () => {
