@@ -111,11 +111,17 @@ const NICKNAME_MIN_LEN = 2;
 const NICKNAME_MAX_LEN = 10;
 
 // --- 닉네임 금지어 목록 (서버 레벨 검열) ---
-// 비속어 / 인종차별 / 성적 단어. 소문자 기준으로 부분 일치 검사한다.
+// 비속어 / 성적 / 아동학대 / 인종차별 단어. 소문자 기준으로 부분 일치 검사한다.
 const forbiddenWords = [
-  'sex', 'nigger', 'nigga', 'fuck', 'shit', 'bitch', 'asshole', 'cunt',
-  'bastard', 'damn', 'faggot', 'nazi', 'rape', 'slut', 'whore',
-  'dick', 'penis', 'vagina'
+  // 성적 / 음란
+  'sex', 'sexy', 'porn', 'childporn', 'nude', 'nudes', 'xxx', 'hentai',
+  'dick', 'penis', 'vagina', 'boob', 'tits', 'slut', 'whore', 'rape', 'horny',
+  // 아동학대 / 아동음란
+  'pedofile', 'pedophile', 'ped0', 'pedo', 'cp',
+  // 인종차별
+  'nigger', 'nigga', 'nlgger', 'faggot', 'nazi', 'chink', 'spic', 'wetback', 'kike',
+  // 일반 비속어
+  'fuck', 'shit', 'bitch', 'asshole', 'cunt', 'bastard', 'damn', 'motherfucker'
 ];
 
 // 금지어 포함 여부 검사 (대소문자 무시)

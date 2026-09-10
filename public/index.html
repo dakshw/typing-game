@@ -576,10 +576,17 @@
 
     // === 닉네임 검열: 금지어 목록 (소문자 기준 부분 일치) ===
     // 로드 시점(loadProfileOnStartup)보다 먼저 선언되어야 하므로 파일 상단에 배치.
+    // 비속어 / 성적 / 아동학대 / 인종차별 단어 전부 차단.
     const FORBIDDEN_WORDS = [
-      'fuck','shit','bitch','cunt','asshole','bastard','damn',
-      'nigger','nigga','faggot','nazi','rape',
-      'slut','whore','dick','penis','vagina'
+      // 성적 / 음란
+      'sex', 'sexy', 'porn', 'childporn', 'cp', 'nude', 'nudes', 'xxx', 'hentai',
+      'dick', 'penis', 'vagina', 'boob', 'tits', 'slut', 'whore', 'rape', 'horny',
+      // 아동학대 / 아동음란
+      'pedofile', 'pedophile', 'ped0', 'pedo', 'pedophile', 'childporn', 'cp',
+      // 인종차별
+      'nigger', 'nigga', 'nlgger', 'faggot', 'nazi', 'chink', 'spic', 'wetback', 'kike',
+      // 일반 비속어
+      'fuck', 'shit', 'bitch', 'asshole', 'cunt', 'bastard', 'damn', 'motherfucker'
     ];
 
     function generateGuestName() {
@@ -762,34 +769,42 @@ function updateTopBar() {
       });
     }
 
+    // 공통: 금지어/무효 닉네임 감지 시 입력값·UI·localStorage를 즉시 Guest_로 강제 덮어쓰기
+    function forceReplaceNickname(reasonMessage) {
+      const fallback = generateGuestName();
+      // 1) 입력폼에 남아있는 값도 즉시 리셋 (모달이 열려 있으면 사용자에게 보임)
+      const nameInputEl = document.getElementById('profileNameInput');
+      if (nameInputEl) nameInputEl.value = fallback;
+      // 2) 로컬 상태 + localStorage 즉시 덮어쓰기
+      myName = fallback;
+      myAvatar = draftAvatar;
+      saveProfileToStorage(myName, myAvatar);
+      // 3) 상단 프로필 UI 즉시 갱신
+      updateTopBar();
+      // 4) 서버에도 교체된 이름 전송 (리더보드/상대방에게 Guest_로 보이도록)
+      socket.emit('setProfile', { name: myName, avatar: myAvatar });
+      fetchLeaderboard();
+      // 5) 경고 문구
+      if (reasonMessage) document.getElementById('statusMessage').innerText = reasonMessage;
+      return fallback;
+    }
+
     function saveProfile() {
       const rawInput = document.getElementById('profileNameInput').value;
       const nameInput = rawInput.replace(/\s+/g, ''); // 공백 전부 제거
 
-      // 금지어 포함 → 경고창 + 변경 차단 후 기본 닉네임(Guest_숫자)으로 자동 대체
+      // 금지어 포함 → 경고창 + 입력값 삭제 즉시 Guest_ 덮어쓰기 (입력폼/UI/localStorage 동시)
       if (containsForbiddenWord(nameInput)) {
         alert('Your nickname contains a forbidden word. It will be replaced with a default name.');
-        myName = generateGuestName();
-        myAvatar = draftAvatar;
-        saveProfileToStorage(myName, myAvatar);
-        socket.emit('setProfile', { name: myName, avatar: myAvatar });
-        updateTopBar();
-        fetchLeaderboard();
+        forceReplaceNickname('⚠️ Nickname blocked (forbidden word). Replaced with a default name.');
         closeProfileModal();
-        document.getElementById('statusMessage').innerText = '⚠️ Nickname blocked (forbidden word). Replaced with a default name.';
         return;
       }
 
-      // 유효하지 않음 (2~10자 초과/미달, <> 포함) → 기본 닉네임으로 자동 대체
+      // 유효하지 않음 (2~10자 초과/미달, <> 포함) → 동일하게 즉시 덮어쓰기
       if (!isValidNickname(nameInput)) {
-        myName = generateGuestName();
-        myAvatar = draftAvatar;
-        saveProfileToStorage(myName, myAvatar);
-        socket.emit('setProfile', { name: myName, avatar: myAvatar });
-        updateTopBar();
-        fetchLeaderboard();
+        forceReplaceNickname('⚠️ Invalid nickname (2-10 chars, no < >). Replaced with a default name.');
         closeProfileModal();
-        document.getElementById('statusMessage').innerText = '⚠️ Invalid nickname (2-10 chars, no < >). Replaced with a default name.';
         return;
       }
 
