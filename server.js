@@ -116,27 +116,19 @@ function generatePlayerNick() {
   return `Player #${number}`;
 }
 
-// 전역 통계 기반 동적 랭킹/칭호 태그 생성.
-function buildPlayerTags(playerId, normalWins, topRankList, topWinId) {
-  const tags = [];
-  if (topRankList) {
-    const idx = topRankList.findIndex(entry => entry.playerId === playerId);
-    if (idx !== -1) {
-      const rank = idx + 1;
-      if (rank === 1) tags.push('[👑 1위]');      // 최강자
-      else if (rank <= 100) tags.push(`[#${rank}]`); // 100위 이내 표시
-    }
-  }
-  if (topWinId && topWinId === playerId) {
-    tags.push(`[🏆 ${normalWins}승]`);         // 최다 승리
-  }
-  return tags.join(' ');
+// 랭킹 순위 기반 닉네임 태그 생성 (100위 이내에만 [#순위] 태그 부여)
+function buildPlayerTags(playerId, topRankList) {
+  if (!topRankList) return '';
+  const idx = topRankList.findIndex(entry => entry.playerId === playerId);
+  if (idx === -1) return '';
+  const rank = idx + 1;
+  if (rank <= 100) return `[#${rank}]`;
+  return '';
 }
 
-// 기존 닉네임에 붙은 태그를 모두 떼어내고, 새로 받은 랭크/칭호 태그를 붙여 반환한다.
-function appendDynamicTag(baseNick, socketId, rankTag) {
+// 기존 닉네임에 붙은 [#...] 태그를 모두 떼어내고, 새로 받은 랭킹 태그를 붙여 반환한다.
+function appendDynamicTag(baseNick, rankTag) {
   const base = baseNick || '';
-  // 이미 서버 측 태그가 붙은 닉네임이라면 태그를 전부 떼어내고 새로 붙인다.
   const coreName = base.replace(/\[[^\]]*\]\s*/g, '').trim();
   if (!coreName) return rankTag.trim();
   return `${coreName} ${rankTag}`.trim();
@@ -152,25 +144,10 @@ function buildTopRankList() {
   return list.slice(0, 100);
 }
 
-// 가장 많은 Normal 승수를 보유한 소켓 ID를 구한다 (동률 시 먼저 등록된 쪽 우선).
-function findTopWinSocketId() {
-  let bestId = null;
-  let bestWins = -1;
-  for (const [id, wins] of Object.entries(userNormalWins)) {
-    if (wins > bestWins) {
-      bestWins = wins;
-      bestId = id;
-    }
-  }
-  return bestId;
-}
-
-// 주어진 소켓 ID에 대해, 현재 전역 통계 기준 랭킹/칭호 태그를 생성한다.
+// 주어진 소켓 ID에 대해, 현재 전역 랭킹 순위 기반 태그를 생성한다.
 function buildRankTagForSocket(socketId) {
   const topRankList = buildTopRankList();
-  const topWinId = findTopWinSocketId();
-  const wins = userNormalWins[socketId] || 0;
-  return buildPlayerTags(socketId, wins, topRankList, topWinId);
+  return buildPlayerTags(socketId, topRankList);
 }
 
 const waitingRankedPlayers = [];
@@ -556,7 +533,7 @@ io.on('connection', (socket) => {
 
   // 현재 전역 통계 기준 랭킹/칭호 태그를 닉네임에 자동으로 결합한다.
   const rankTag = buildRankTagForSocket(socket.id);
-  userNames[socket.id] = appendDynamicTag(userNames[socket.id], socket.id, rankTag);
+  userNames[socket.id] = appendDynamicTag(userNames[socket.id], rankTag);
 
   socket.emit('initUser', {
     rating: userRatings[socket.id],
