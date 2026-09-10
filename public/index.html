@@ -574,11 +574,46 @@
       }
     }
 
+    // === 닉네임 검열: 금지어 목록 (소문자 기준 부분 일치) ===
+    // 로드 시점(loadProfileOnStartup)보다 먼저 선언되어야 하므로 파일 상단에 배치.
+    const FORBIDDEN_WORDS = [
+      'fuck','shit','bitch','cunt','asshole','bastard','damn',
+      'nigger','nigga','faggot','nazi','rape',
+      'slut','whore','dick','penis','vagina'
+    ];
+
+    function generateGuestName() {
+      return 'Guest_' + Math.floor(1000 + Math.random() * 9000);
+    }
+
+    function containsForbiddenWord(name) {
+      const lower = (name || '').toLowerCase();
+      return FORBIDDEN_WORDS.some(w => lower.includes(w));
+    }
+
+    // 공백 제거 후 2~10자, <> 금지, 금지어 포함 금지
+    function isValidNickname(raw) {
+      const trimmed = (raw || '').replace(/\s+/g, '');
+      if (trimmed.length < 2 || trimmed.length > 10) return false;
+      if (/[<>]/.test(trimmed)) return false;
+      if (containsForbiddenWord(trimmed)) return false;
+      return true;
+    }
+
     // === 페이지 로드 즉시 localStorage 프로필을 UI에 반영 (Guest 플래시 방지) ===
+    // 저장된 이름이 금지어 포함/무효라면 즉시 Guest_숫자로 교체하고 localStorage도 덮어쓴다.
     (function loadProfileOnStartup() {
       const saved = loadSavedProfile();
       if (saved) {
-        if (saved.name) { myName = saved.name; document.getElementById('myNameDisplay').innerText = saved.name; }
+        if (saved.name) {
+          if (isValidNickname(saved.name)) {
+            myName = saved.name;
+          } else {
+            myName = generateGuestName();
+            saveProfileToStorage(myName, saved.avatar || myAvatar); // 로컬 저장소도 즉시 교체
+          }
+          document.getElementById('myNameDisplay').innerText = myName;
+        }
         if (saved.avatar) { myAvatar = saved.avatar; document.getElementById('myAvatarBadge').innerText = saved.avatar; }
       }
     })();
@@ -587,7 +622,15 @@
     // 프로필 처리 완료(ACK) 후에만 리더보드를 요청한다.
     socket.on('connect', () => {
       const saved = loadSavedProfile();
-      const profileData = { name: (saved && saved.name) || myName, avatar: (saved && saved.avatar) || myAvatar };
+      // 서버 전송 전 클라이언트 단 한 번 더 필터링 (금지어/무효 이름은 Guest_숫자로 교체)
+      let sendName = (saved && saved.name) || myName;
+      if (!isValidNickname(sendName)) {
+        sendName = generateGuestName();
+        myName = sendName;
+        saveProfileToStorage(sendName, (saved && saved.avatar) || myAvatar);
+        updateTopBar();
+      }
+      const profileData = { name: sendName, avatar: (saved && saved.avatar) || myAvatar };
 
       // setProfile에 ACK 콜백을 넘겨 프로필 등록 완료 시점에 리더보드를 요청
       socket.emit('setProfile', profileData, () => {
@@ -598,22 +641,31 @@
     });
 
     socket.on('initUser', (data) => {
-  myRating = data.rating;
-  myTrophies = data.trophies || 0;
-  allowedAvatars = data.allowedAvatars || [];
-  applyUnlockStatus(data);
+      myRating = data.rating;
+      myTrophies = data.trophies || 0;
+      allowedAvatars = data.allowedAvatars || [];
+      applyUnlockStatus(data);
 
-  // 서버에서 받은 이름/아바타를 사용하되, localStorage에 저장된 프로필이 있으면 우선 적용
-  const saved = loadSavedProfile();
-  if (saved && saved.name) myName = saved.name;
-  else myName = data.name;
-  if (saved && saved.avatar) myAvatar = saved.avatar;
-  else myAvatar = data.avatar;
+      // 서버 검증 완료 닉네임을 역방향 동기화 (서버 우선)
+      // 서버가 이미 Guest_ 교체를 마쳤을 수 있으므로 유효한 이름은 무조건 서버 값을 따르고
+      // localStorage도 같이 덮어써서 서버/로컬 불일치를 제거한다.
+      if (data.name && isValidNickname(data.name)) {
+        if (myName !== data.name) {
+          myName = data.name;
+          saveProfileToStorage(myName, myAvatar);
+        }
+      } else if (data.name) {
+        // 서버 이름조차 무효하면(방어 코드) 로컬에서도 Guest_ 교체
+        myName = generateGuestName();
+        saveProfileToStorage(myName, myAvatar);
+      }
 
-  updateTopBar();
-  // initUser 수신 시 리더보드도 갱신 (connect ACK보다 먼저 도착할 수 있음)
-  fetchLeaderboard();
-});
+      if (data.avatar) myAvatar = data.avatar;
+
+      updateTopBar();
+      // initUser 수신 시 리더보드도 갱신 (connect ACK보다 먼저 도착할 수 있음)
+      fetchLeaderboard();
+    });
 
     socket.on('unlockStatus', (data) => {
       applyUnlockStatus(data, { justUnlocked: !!(data && data.justUnlocked) });
@@ -640,7 +692,13 @@
 });
 
 socket.on('profileUpdated', (data) => {
-  if (data.nameAccepted !== false && data.name) myName = data.name;
+  // 서버가 검증/강제 교체(Guest_숫자)까지 마친 최종 닉네임을 역방향 동기화
+  if (data.name && isValidNickname(data.name)) {
+    if (myName !== data.name) {
+      myName = data.name;
+      saveProfileToStorage(myName, myAvatar);
+    }
+  }
   if (data.avatarAccepted !== false && data.avatar) myAvatar = data.avatar;
   updateTopBar();
 });
@@ -702,31 +760,6 @@ function updateTopBar() {
         };
         grid.appendChild(cell);
       });
-    }
-
-    // --- 닉네임 검열: 금지어 목록 (소문자 기준 부분 일치) ---
-    const FORBIDDEN_WORDS = [
-      'fuck','shit','bitch','cunt','asshole','bastard','damn',
-      'nigger','nigga','faggot','nazi','rape',
-      'slut','whore','dick','penis','vagina'
-    ];
-
-    function generateGuestName() {
-      return 'Guest_' + Math.floor(1000 + Math.random() * 9000);
-    }
-
-    function containsForbiddenWord(name) {
-      const lower = (name || '').toLowerCase();
-      return FORBIDDEN_WORDS.some(w => lower.includes(w));
-    }
-
-    // 공백 제거 후 2~10자, <> 금지, 금지어 포함 금지
-    function isValidNickname(raw) {
-      const trimmed = (raw || '').replace(/\s+/g, '');
-      if (trimmed.length < 2 || trimmed.length > 10) return false;
-      if (/[<>]/.test(trimmed)) return false;
-      if (containsForbiddenWord(trimmed)) return false;
-      return true;
     }
 
     function saveProfile() {
