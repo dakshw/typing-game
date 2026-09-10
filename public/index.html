@@ -989,6 +989,17 @@
       return `<div class="dash-col ${colClass}"><h4>${label}</h4><div class="dash-stat-row"><span class="k">Net Chars</span><span class="v">${stats.netCorrect}</span></div><div class="dash-stat-row"><span class="k">Accuracy</span><span class="v">${stats.accuracy}%</span></div></div>`;
     }
 
+    socket.on('sessionReplaced', () => {
+      gameEnded = true;
+      document.getElementById('typingInput').disabled = true;
+      document.getElementById('gameArea').style.display = 'none';
+      document.getElementById('roomCodeModal').classList.remove('show');
+      document.getElementById('reportModalOverlay').classList.remove('show');
+      document.getElementById('title').innerText = 'Session replaced';
+      document.getElementById('statusMessage').innerText = '⚠️ Other session connected — this tab has been disconnected.';
+      alert('Other session connected.\nThis tab has been disconnected because the same account is now active elsewhere.');
+    });
+
     socket.on('gameOver', (data) => {
       gameEnded = true;
       clearInterval(gameTimerInterval);
@@ -1021,8 +1032,13 @@
       const oppName = data.opponentName || 'Opponent';
       const reportBtnHtml = isBotMatch ? '' : `<button class="btn-report" id="reportBtn" onclick="openReportModal()" ${alreadyReported ? 'disabled' : ''}>${alreadyReported ? 'Reported' : '⚠ Report'}</button>`;
 
+      let invalidatedNote = '';
+      if (data.invalidated) {
+        invalidatedNote = `<div class="rating-change" style="color:#888;">⚖️ Practice match — rewards not counted (same account detected)</div>`;
+      }
       document.getElementById('resultBanner').innerHTML = `
         <div class="dash-result-tag ${tagClass}">${tagText}</div>
+        ${invalidatedNote}
         <div class="opp-name-row">
           <span class="opp-label">vs</span>
           <span class="opp-name">${oppName}</span>

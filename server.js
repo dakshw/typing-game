@@ -99,7 +99,7 @@ const userNames = {};
 const userAvatars = {};
 const userNormalWins = {};
 const accountNormalWins = {};
-const waitingNormalPlayers = {};
+const waitingNormalPlayers = {}; // { matchKey: [socket, ...] } — 대기열 (동일 계정/IP 매칭 방지 필터 적용)
 const userTrophies = {};
 const accountTrophies = {};
 const accountRatings = {}; // { playerId: rating } — 재접속 시 레이팅 복구용
@@ -107,6 +107,27 @@ const accountNames = {}; // { playerId: 'Player #XXXXXX' } — 재접속 시 닉
 // 프로필에서 선택 가능한 아바타 이모지 화이트리스트.
 const ALLOWED_AVATARS = ['😀', '😎', '🤖', '🐱', '🐶', '🦊', '🐼', '🐵', '🔥', '⚡', '🎯', '🚀'];
 const DEFAULT_AVATAR = ALLOWED_AVATARS[0];
+
+// --- 중복 접속 / 어뷰징 방지 (Anti-Abuse) ---
+const playerIdToSocket = {}; // { playerId: socketId } — 동일 계정 다중 접속 차단용
+
+function getClientIp(socket) {
+  const addr = (socket.handshake && socket.handshake.address) || '';
+  return addr.replace(/^::ffff:/, '').trim();
+}
+
+// 두 소켓이 같은 계정(playerId) 또는 같은 IP에서 접속했는지 판정한다.
+// true면 매칭이 성립되지 않고, 이미 진행된 대전(커스텀 룸 등)이라면 보상이 무효화된다.
+function isAbusivePair(socketA, socketB) {
+  if (!socketA || !socketB) return false;
+  const pidA = socketA.data && socketA.data.playerId;
+  const pidB = socketB.data && socketB.data.playerId;
+  if (pidA && pidB && pidA === pidB) return true;
+  const ipA = socketA.data && socketA.data.ip;
+  const ipB = socketB.data && socketB.data.ip;
+  if (ipA && ipB && ipA === ipB) return true;
+  return false;
+}
 
 // Player # + 6자리 랜덤 숫자 형태의 닉네임 생성
 function generatePlayerCode() {
@@ -285,7 +306,9 @@ function calculateNewRatings(winnerRating, loserRating) {
 function removeFromWaitingQueues(socket) {
   delete soloPracticeSessions[socket.id];
   Object.keys(waitingNormalPlayers).forEach((k) => {
-    if (waitingNormalPlayers[k] === socket) delete waitingNormalPlayers[k];
+    if (!Array.isArray(waitingNormalPlayers[k])) return;
+    waitingNormalPlayers[k] = waitingNormalPlayers[k].filter((s) => s !== socket);
+    if (waitingNormalPlayers[k].length === 0) delete waitingNormalPlayers[k];
   });
   const rIdx = waitingRankedPlayers.findIndex((p) => p.socket === socket);
   if (rIdx > -1) waitingRankedPlayers.splice(rIdx, 1);
@@ -399,8 +422,13 @@ function startMatch(playerA, playerB, mode, duration, isRanked, customRoomId) {
   playerA.data.roomId = roomId;
   playerB.data.roomId = roomId;
 
+  // 동일 계정/동일 IP 간 대전은 승패 보상이 무효화된다 (커스텀 룸 우회 방지).
+  const invalidated = isAbusivePair(playerA, playerB);
+  if (invalidated) console.log(`[Anti-Abuse] Same-account/IP match created: ${roomId}`);
+
   rooms[roomId] = {
     mode, text, startTime, duration, isRanked,
+    invalidated,
     endTimeoutId: null, ended: false, players: {}
   };
   rooms[roomId].players[playerA.id] = createEmptyPlayerState();
@@ -482,8 +510,9 @@ function endGame(roomId, forcedWinnerId) {
     }
   }
 
+  // 어뷰징 매치(동일 계정/IP)는 MMR 변동 없음
   let ratingChanges = {};
-  if (room.isRanked && winnerId !== null) {
+  if (room.isRanked && !room.invalidated && winnerId !== null) {
     const loserId = ids.find(id => id !== winnerId);
     const wRating = userRatings[winnerId] || 1000;
     const lRating = userRatings[loserId] || 1000;
@@ -497,21 +526,26 @@ function endGame(roomId, forcedWinnerId) {
   }
 
   let winnerUnlock = null;
-  if (!room.isRanked && winnerId !== null) {
+  if (!room.isRanked && !room.invalidated && winnerId !== null) {
     const winnerSocket = io.sockets.sockets.get(winnerId);
     if (winnerSocket) winnerUnlock = addNormalWin(winnerSocket);
   }
 
   // --- 트로피 변동 계산 (시간 모드 배율 적용) ---
+  // 어뷰징 매치(동일 계정/IP)는 트로피 변동 없음
   const trophyChanges = {};
-  ids.forEach((id) => {
-    const res = winnerId === null ? 'draw' : (winnerId === id ? 'win' : 'lose');
-    const change = getTrophyChange(res, room.duration);
-    userTrophies[id] = Math.max(0, (userTrophies[id] || 0) + change);
-    trophyChanges[id] = { new: userTrophies[id], diff: change };
-    const playerSocketForTrophy = io.sockets.sockets.get(id);
-    if (playerSocketForTrophy) persistTrophies(playerSocketForTrophy);
-  });
+  if (!room.invalidated) {
+    ids.forEach((id) => {
+      const res = winnerId === null ? 'draw' : (winnerId === id ? 'win' : 'lose');
+      const change = getTrophyChange(res, room.duration);
+      userTrophies[id] = Math.max(0, (userTrophies[id] || 0) + change);
+      trophyChanges[id] = { new: userTrophies[id], diff: change };
+      const playerSocketForTrophy = io.sockets.sockets.get(id);
+      if (playerSocketForTrophy) persistTrophies(playerSocketForTrophy);
+    });
+  } else {
+    console.log(`[Anti-Abuse] Match rewards invalidated: ${roomId}`);
+  }
 
   // 경쟁전 레이팅 영구 저장
   if (room.isRanked) {
@@ -535,6 +569,7 @@ function endGame(roomId, forcedWinnerId) {
       trophyData: trophyChanges[id],
       unlock: playerSocket ? unlockPayload(playerSocket) : null,
       justUnlocked: !!(winnerUnlock && winnerId === id && winnerUnlock.justUnlocked),
+      invalidated: !!room.invalidated,
       opponentId: oppPlayerId,
       opponentName: userNames[oppId] || 'Opponent',
       roomId: roomId
@@ -562,6 +597,9 @@ function sendInitUser(socket) {
 io.on('connection', (socket) => {
   runSeasonResets();
 
+  // 어뷰징 판정용 클라이언트 IP 기록 (직접 연결 기준 — 프록시 미사용 환경 전제)
+  socket.data.ip = getClientIp(socket);
+
   userRatings[socket.id] = userRatings[socket.id] || 1000;
   userAvatars[socket.id] = userAvatars[socket.id] || DEFAULT_AVATAR;
   userNormalWins[socket.id] = userNormalWins[socket.id] || 0;
@@ -582,6 +620,20 @@ io.on('connection', (socket) => {
       return;
     }
     socket.data.playerId = playerId;
+
+    // 동일 계정 중복 접속 차단: 먼저 접속해 있던 세션을 강제 종료(Kick)한다.
+    const existingSocketId = playerIdToSocket[playerId];
+    if (existingSocketId && existingSocketId !== socket.id) {
+      const existingSocket = io.sockets.sockets.get(existingSocketId);
+      if (existingSocket && existingSocket.connected) {
+        existingSocket.emit('sessionReplaced');
+        // 알림 패킷 전송 후 강제 종료
+        setTimeout(() => { try { existingSocket.disconnect(true); } catch (e) {} }, 100);
+        console.log(`[Anti-Abuse] Duplicate session kicked: ${playerId}`);
+      }
+    }
+    playerIdToSocket[playerId] = socket.id;
+
     userNormalWins[socket.id] = accountNormalWins[playerId] || 0;
     userRatings[socket.id] = accountRatings[playerId] || userRatings[socket.id];
     userTrophies[socket.id] = accountTrophies[playerId] || 0;
@@ -616,8 +668,9 @@ io.on('connection', (socket) => {
 
     if (isRanked) {
       const myRating = userRatings[socket.id];
+      // 동일 계정/동일 IP 소켓과는 매칭되지 않도록 필터링한다.
       const candidates = waitingRankedPlayers.filter(
-        p => p.socket.id !== socket.id && p.mode === mode && p.duration === duration && p.socket.connected
+        p => p.socket.id !== socket.id && p.mode === mode && p.duration === duration && p.socket.connected && !isAbusivePair(p.socket, socket)
       );
 
       if (candidates.length > 0) {
@@ -635,15 +688,27 @@ io.on('connection', (socket) => {
       }
     } else {
       const matchKey = `time_${duration}`;
-      const opponent = waitingNormalPlayers[matchKey];
+      const queue = Array.isArray(waitingNormalPlayers[matchKey])
+        ? waitingNormalPlayers[matchKey]
+        : (waitingNormalPlayers[matchKey] = []);
 
-      if (opponent && opponent.connected && opponent.id !== socket.id) {
-        delete waitingNormalPlayers[matchKey];
+      // 끊긴 소켓 정리
+      for (let i = queue.length - 1; i >= 0; i--) {
+        if (!queue[i].connected) queue.splice(i, 1);
+      }
+
+      // 동일 계정/동일 IP 소켓과는 매칭되지 않도록 필터링한다.
+      const oppIdx = queue.findIndex(
+        (s) => s.connected && s.id !== socket.id && !isAbusivePair(s, socket)
+      );
+
+      if (oppIdx > -1) {
+        const [opponent] = queue.splice(oppIdx, 1);
         startMatch(opponent, socket, mode, duration, false);
         clearPracticeSession(socket.id);
         clearPracticeSession(opponent.id);
       } else {
-        waitingNormalPlayers[matchKey] = socket;
+        queue.push(socket);
         socket.emit('waiting', { isRanked: false });
       }
     }
@@ -719,6 +784,12 @@ io.on('connection', (socket) => {
     const room = customRooms[code];
     if (room.players.length >= 2) {
       socket.emit('roomError', { message: 'Room is full.' });
+      return;
+    }
+    // 동일 계정(같은 playerId)이 다른 세션으로 자기 방에 입장하는 것을 차단한다.
+    const hostSocket = room.players[0];
+    if (hostSocket && hostSocket.data.playerId && hostSocket.data.playerId === socket.data.playerId) {
+      socket.emit('roomError', { message: 'You cannot join your own room.' });
       return;
     }
     room.players.push(socket);
@@ -898,6 +969,18 @@ io.on('connection', (socket) => {
     removeFromWaitingQueues(socket);
     clearPracticeSession(socket.id);
 
+    // 중복 접속 관리 맵 정리
+    const myPid = socket.data.playerId;
+    if (myPid && playerIdToSocket[myPid] === socket.id) delete playerIdToSocket[myPid];
+
+    // 커스텀 룸 정리 (연결 종료 시 방에서 제거)
+    const cCode = socket.data.customRoomCode;
+    if (cCode && customRooms[cCode]) {
+      customRooms[cCode].players = customRooms[cCode].players.filter((p) => p.id !== socket.id);
+      if (customRooms[cCode].players.length === 0) delete customRooms[cCode];
+      else customRooms[cCode].players[0].emit('roomError', { message: 'Opponent left the room.' });
+    }
+
     const room = rooms[socket.data.roomId];
     if (room && !room.ended) {
       room.ended = true;
@@ -908,7 +991,7 @@ io.on('connection', (socket) => {
       let remainingUnlock = remainingSocket ? unlockPayload(remainingSocket) : null;
       let justUnlocked = false;
 
-      if (!room.isRanked && remainingSocket) {
+      if (!room.isRanked && remainingSocket && !room.invalidated) {
         const afterWin = addNormalWin(remainingSocket);
         remainingUnlock = afterWin;
         justUnlocked = !!(afterWin && afterWin.justUnlocked);
