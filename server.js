@@ -104,51 +104,74 @@ const userTrophies = {};
 const accountTrophies = {};
 const accountRatings = {}; // { playerId: rating } — 재접속 시 레이팅 복구용
 // 프로필에서 선택 가능한 아바타 이모지 화이트리스트.
-// 클라이언트가 임의 문자열을 보내도 여기 없으면 서버가 거부한다.
 const ALLOWED_AVATARS = ['😀', '😎', '🤖', '🐱', '🐶', '🦊', '🐼', '🐵', '🔥', '⚡', '🎯', '🚀'];
 const DEFAULT_AVATAR = ALLOWED_AVATARS[0];
-const NICKNAME_MIN_LEN = 2;
-const NICKNAME_MAX_LEN = 10;
 
-// --- 닉네임 금지어 목록 (서버 레벨 검열) ---
-// 비속어 / 성적 / 아동학대 / 인종차별 단어. 소문자 기준으로 부분 일치 검사한다.
-const forbiddenWords = [
-  // 성적 / 음란
-  'sex', 'sexy', 'porn', 'childporn', 'nude', 'nudes', 'xxx', 'hentai',
-  'dick', 'penis', 'vagina', 'boob', 'tits', 'slut', 'whore', 'rape', 'horny',
-  // 아동학대 / 아동음란
-  'pedofile', 'pedophile', 'ped0', 'pedo', 'cp',
-  // 인종차별
-  'nigger', 'nigga', 'nlgger', 'faggot', 'nazi', 'chink', 'spic', 'wetback', 'kike',
-  // 일반 비속어
-  'fuck', 'shit', 'bitch', 'asshole', 'cunt', 'bastard', 'damn', 'motherfucker'
-];
+// --- 접속 순번 기반 Player # 닉네임 시스템 ---
+let nextPlayerNumber = 1;
 
-// 금지어 포함 여부 검사 (대소문자 무시)
-function containsForbiddenWord(name) {
-  const lower = (name || '').toLowerCase();
-  return forbiddenWords.some(word => lower.includes(word));
+// Player #번호 형태의 기본 닉네임 생성 (접속 순번 기반)
+function generatePlayerNick() {
+  const number = nextPlayerNumber++;
+  return `Player #${number}`;
 }
 
-// 임의 기본 닉네임 생성: 'Guest_' + 4자리 숫자
-function generateGuestNickname() {
-  return 'Guest_' + Math.floor(1000 + Math.random() * 9000);
+// 전역 통계 기반 동적 랭킹/칭호 태그 생성.
+function buildPlayerTags(playerId, normalWins, topRankList, topWinId) {
+  const tags = [];
+  if (topRankList) {
+    const idx = topRankList.findIndex(entry => entry.playerId === playerId);
+    if (idx !== -1) {
+      const rank = idx + 1;
+      if (rank === 1) tags.push('[👑 1위]');      // 최강자
+      else if (rank <= 100) tags.push(`[#${rank}]`); // 100위 이내 표시
+    }
+  }
+  if (topWinId && topWinId === playerId) {
+    tags.push(`[🏆 ${normalWins}승]`);         // 최다 승리
+  }
+  return tags.join(' ');
 }
 
-// 닉네임 강제 검증/변환:
-// - 없거나 빈 문자열 → Guest_숫자
-// - 금지어 포함 → Guest_숫자 (강제 교체)
-// - 공백 제외 2자 미만 / 10자 초과 → Guest_숫자 (강제 교체)
-// - 유효하면 앞뒤 공백 제거 + 꺾쇠괄호 제거한 값 반환
-function enforceNickname(raw) {
-  if (typeof raw !== 'string') return generateGuestNickname();
-  const trimmed = raw.trim().replace(/[<>]/g, '');
-  if (!trimmed) return generateGuestNickname();
-  if (containsForbiddenWord(trimmed)) return generateGuestNickname();
-  const noSpace = trimmed.replace(/\s+/g, '');
-  if (noSpace.length < NICKNAME_MIN_LEN || noSpace.length > NICKNAME_MAX_LEN) return generateGuestNickname();
-  return trimmed;
+// 기존 닉네임에 붙은 태그를 모두 떼어내고, 새로 받은 랭크/칭호 태그를 붙여 반환한다.
+function appendDynamicTag(baseNick, socketId, rankTag) {
+  if (!baseNick) return rankTag.trim();
+  const coreName = (baseNick || '').replace(/\[[^\]]*\]\s*/g, '').trim();
+  if (!coreName) return rankTag.trim();
+  return `${coreName} ${rankTag}`.trim();
 }
+
+// 현재 서버 메모리 기준 정상 MMR 랭킹 상위 100명 리스트를 만든다.
+function buildTopRankList() {
+  const list = [];
+  for (const [id, rating] of Object.entries(userRatings)) {
+    list.push({ id, rating });
+  }
+  list.sort((a, b) => b.rating - a.rating);
+  return list.slice(0, 100);
+}
+
+// 가장 많은 Normal 승수를 보유한 소켓 ID를 구한다 (동률 시 먼저 등록된 쪽 우선).
+function findTopWinSocketId() {
+  let bestId = null;
+  let bestWins = -1;
+  for (const [id, wins] of Object.entries(userNormalWins)) {
+    if (wins > bestWins) {
+      bestWins = wins;
+      bestId = id;
+    }
+  }
+  return bestId;
+}
+
+// 주어진 소켓 ID에 대해, 현재 전역 통계 기준 랭킹/칭호 태그를 생성한다.
+function buildRankTagForSocket(socketId) {
+  const topRankList = buildTopRankList();
+  const topWinId = findTopWinSocketId();
+  const wins = userNormalWins[socketId] || 0;
+  return buildPlayerTags(socketId, wins, topRankList, topWinId);
+}
+
 const waitingRankedPlayers = [];
 const rooms = {};
 const customRooms = {}; // { CODE: { mode, duration, isRanked, players: [socket] } }
@@ -543,13 +566,18 @@ io.on('connection', (socket) => {
   userNormalWins[socket.id] = userNormalWins[socket.id] || 0;
   userTrophies[socket.id] = userTrophies[socket.id] || 0; // 초기 트로피 설정
 
+  // 현재 전역 통계 기준 랭킹/칭호 태그를 닉네임에 붙여 연결하고, 클라이언트에 전달한다.
+  const rankTag = buildRankTagForSocket(socket.id);
+  userNames[socket.id] = appendDynamicTag(userNames[socket.id], socket.id, rankTag);
+
   socket.emit('initUser', {
     rating: userRatings[socket.id],
-    trophies: userTrophies[socket.id], // 트로피 데이터 전달
+    trophies: userTrophies[socket.id],
     name: userNames[socket.id],
     avatar: userAvatars[socket.id],
     allowedAvatars: ALLOWED_AVATARS,
-    ...unlockPayload(socket)
+    ...unlockPayload(socket),
+    rankTag: rankTag
   });
 
   // 새로고침해도 같은 브라우저면 일반전 승수를 이어가기 위한 계정 키.
