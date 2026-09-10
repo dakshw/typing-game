@@ -255,7 +255,10 @@
         <div class="code-label">Invite Code</div>
         <div class="code-value" id="roomWaitingCode"></div>
         <div>Waiting for opponent<span class="dots"></span></div>
-        <button class="btn-close-room" onclick="cancelPrivateRoom()" style="margin-top:10px;">✕ Leave Room</button>
+        <div style="margin-top:10px; display:flex; gap:8px; justify-content:center;">
+          <button class="btn-copy-link" id="copyInviteLinkBtn" style="display:none;" onclick="copyInviteLinkToClipboard()">📋 Copy Invite Link</button>
+          <button class="btn-close-room" onclick="cancelPrivateRoom()">✕ Leave Room</button>
+        </div>
       </div>
     </div>
 
@@ -386,6 +389,7 @@
     let lastMatchStats = null;
     let selectedReportReason = null;
     let reportedMatchIds = new Set();
+    let isBotMatch = false;
 
     // --- Report ---
     function openReportModal() {
@@ -575,12 +579,34 @@
     function cancelPrivateRoom() {
       socket.emit('cancelRoom');
       privateRoomCode = null;
+      history.replaceState(null, '', window.location.pathname);
+      document.getElementById('copyInviteLinkBtn').style.display = 'none';
       document.getElementById('roomWaiting').style.display = 'none';
       document.getElementById('modeSelect').style.display = 'flex';
       document.getElementById('typeTab').style.display = 'flex';
       setLobbyVisible(true);
       document.getElementById('title').innerText = 'Select Match Duration';
       document.getElementById('statusMessage').innerText = '';
+    }
+
+    // 메인 대기실의 Copy Invite Link 버튼 — 현재 ?room=CODE URL을 클립보드에 복사
+    function copyInviteLinkToClipboard() {
+      if (!privateRoomCode) { document.getElementById('statusMessage').innerText = '⚠️ No active room.'; return; }
+      const url = window.location.origin + window.location.pathname + '?room=' + privateRoomCode;
+      const done = () => { document.getElementById('statusMessage').innerText = '✅ Invite link copied!'; };
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(url).then(done).catch(() => fallbackCopy(url, done));
+      } else {
+        fallbackCopy(url, done);
+      }
+    }
+
+    function fallbackCopy(text, done) {
+      const ta = document.createElement('textarea');
+      ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
+      document.body.appendChild(ta); ta.select();
+      try { document.execCommand('copy'); if (done) done(); } catch (e) {}
+      document.body.removeChild(ta);
     }
 
     function copyInviteLink() {
@@ -637,7 +663,9 @@
       document.getElementById('typeTab').style.display = 'none';
       setLobbyVisible(false);
       document.getElementById('title').innerText = "Finding opponent...";
-      document.getElementById('statusMessage').innerText = isRanked ? "Searching for a similar rank..." : "Looking for an opponent...";
+      document.getElementById('statusMessage').innerText = isRanked
+        ? "Searching for a similar rank... (AI Bot joins in 5s if no match)"
+        : "Looking for an opponent... (AI Bot joins in 5s if no match)";
       document.getElementById('waitingControls').style.display = 'block';
     }
 
@@ -860,8 +888,9 @@
       document.getElementById('waitingControls').style.display = 'none';
       document.getElementById('gameArea').style.display = 'block';
       setLobbyVisible(false);
-      document.getElementById('modeBadge').innerText = `${data.isRanked ? '[Ranked] ' : '[Casual] '}${duration}s`;
-      document.getElementById('statusMessage').innerText = "Opponent found!";
+      document.getElementById('modeBadge').innerText = `${data.isBotMatch ? '[Practice vs AI Bot] ' : data.isRanked ? '[Ranked] ' : '[Casual] '}${duration}s`;
+      document.getElementById('statusMessage').innerText = data.isBotMatch ? "No opponent found — practicing vs AI Bot!" : "Opponent found!";
+      isBotMatch = !!data.isBotMatch;
       document.getElementById('resultBanner').innerHTML = '';
       document.getElementById('restartRow').style.display = 'none';
       if (data.myTier && data.opponentTier) renderMatchupBar(data);
@@ -873,12 +902,15 @@
       if (oppCaretEl) positionCaret(oppCaretEl, data.charIndex || 0);
     });
 
+    // 방 생성 시 초대 링크를 URL에 반영 (?room=CODE) + 메인 대기실 Copy Invite Link 버튼 표시
     socket.on('roomCreated', (data) => {
       privateRoomCode = data.code;
+      history.replaceState(null, '', '?room=' + data.code);
       document.getElementById('roomCodeDisplay').innerText = data.code;
       document.getElementById('roomCodeModal').classList.add('show');
       document.getElementById('roomWaitingCode').innerText = data.code;
       document.getElementById('roomWaiting').style.display = 'block';
+      document.getElementById('copyInviteLinkBtn').style.display = 'inline-block';
       document.getElementById('modeSelect').style.display = 'none';
       document.getElementById('typeTab').style.display = 'none';
       setLobbyVisible(false);
@@ -953,13 +985,14 @@
       const matchKey = lastRoomId || '';
       const alreadyReported = reportedMatchIds.has(matchKey);
       const oppName = data.opponentName || 'Opponent';
+      const reportBtnHtml = isBotMatch ? '' : `<button class="btn-report" id="reportBtn" onclick="openReportModal()" ${alreadyReported ? 'disabled' : ''}>${alreadyReported ? 'Reported' : '⚠ Report'}</button>`;
 
       document.getElementById('resultBanner').innerHTML = `
         <div class="dash-result-tag ${tagClass}">${tagText}</div>
         <div class="opp-name-row">
           <span class="opp-label">vs</span>
           <span class="opp-name">${oppName}</span>
-          <button class="btn-report" id="reportBtn" onclick="openReportModal()" ${alreadyReported ? 'disabled' : ''}>${alreadyReported ? 'Reported' : '⚠ Report'}</button>
+          ${reportBtnHtml}
         </div>
         ${changeHtml}
         <div class="dash-main">
@@ -976,6 +1009,10 @@
       document.getElementById('resultBanner').className = 'result-banner dashboard show';
       document.getElementById('restartRow').style.display = 'block';
       setLobbyVisible(true);
+    });
+
+    socket.on('botMatchStarting', () => {
+      document.getElementById('statusMessage').innerText = '🤖 No opponent found — starting AI Bot match...';
     });
 
     socket.on('opponentLeft', (data) => {
