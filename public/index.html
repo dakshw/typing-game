@@ -1,0 +1,1341 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Speed Typing Test - 1v1 Multi</title>
+  <style>
+    :root { --mt-yellow: #e2b714; --line-height: 38px; }
+    body { font-family: sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; background: #121212; color: #fff; margin: 0; }
+    .container { width: 640px; text-align: center; }
+
+    .tab-row { display: flex; justify-content: center; gap: 10px; margin-bottom: 12px; }
+    .tab-btn { padding: 10px 24px; font-weight: bold; background: #222; border: 1px solid #444; color: #aaa; border-radius: 20px; cursor: pointer; }
+    .tab-btn.active { background: #333; color: var(--mt-yellow); border-color: var(--mt-yellow); }
+    .tab-btn.locked { opacity: 0.55; cursor: not-allowed; position: relative; }
+    .tab-btn.locked.active { background: #222; color: #aaa; border-color: #444; }
+    .tab-btn .lock-label { display: none; font-size: 0.72rem; font-weight: normal; color: #888; margin-top: 3px; }
+    .tab-btn.locked .lock-label { display: block; }
+
+    .unlock-panel { width: 100%; max-width: 420px; margin: 0 auto 16px; padding: 10px 14px; background: #1c1c1c; border: 1px solid #333; border-radius: 10px; text-align: left; }
+    .unlock-panel.hidden { display: none; }
+    .unlock-panel-head { display: flex; justify-content: space-between; align-items: center; font-size: 0.82rem; color: #aaa; margin-bottom: 8px; }
+    .unlock-panel-head strong { color: var(--mt-yellow); }
+    .unlock-bar-bg { width: 100%; height: 10px; background: #333; border-radius: 6px; overflow: hidden; }
+    .unlock-bar-fill { height: 100%; width: 0%; background: var(--mt-yellow); transition: width 0.2s ease-out; }
+    .unlock-done { color: #4caf50; font-size: 0.82rem; font-weight: bold; text-align: center; }
+
+    .user-info { margin-bottom: 15px; font-size: 1.1rem; color: #ccc; }
+    .user-info span { color: var(--mt-yellow); font-weight: bold; }
+
+    .btn-restart { display: inline-block; margin-top: 20px; padding: 10px 20px; font-size: 1rem; background: #4caf50; color: #fff; border: none; border-radius: 5px; cursor: pointer; }
+    .btn-restart:hover { background: #45a049; }
+    .btn-secondary { background: transparent; border: 1px solid #555; color: #aaa; padding: 8px 14px; font-size: 0.85rem; margin-left: 10px; }
+    .btn-secondary:hover { background: #222; border-color: #777; }
+    .restart-row { display: none; margin-top: 20px; }
+
+    .mode-select { display: flex; flex-direction: column; align-items: center; gap: 14px; margin-top: 10px; }
+    .mode-buttons { display: flex; gap: 16px; }
+    .btn-mode { padding: 16px 28px; font-size: 1.05rem; background: #1c1c1c; border: 2px solid #444; color: #fff; border-radius: 10px; cursor: pointer; transition: border-color 0.15s, transform 0.15s; }
+    .btn-mode:hover { border-color: #2196f3; transform: translateY(-2px); }
+    .btn-mode .mode-title { font-weight: bold; font-size: 1.15rem; display: block; margin-bottom: 4px; }
+    .btn-mode .mode-desc { font-size: 0.8rem; color: #999; }
+
+    .duration-select { display: none; flex-direction: column; align-items: center; gap: 10px; }
+    .duration-buttons { display: flex; gap: 12px; }
+    .btn-duration { padding: 14px 22px; font-size: 1.05rem; font-weight: bold; background: #1c1c1c; border: 2px solid #444; color: #fff; border-radius: 10px; cursor: pointer; }
+    .btn-duration:hover { border-color: #2196f3; }
+    .btn-back { margin-top: 4px; background: none; border: none; color: #888; font-size: 0.85rem; cursor: pointer; text-decoration: underline; }
+
+    .game-area { display: none; }
+    .type-area { position: relative; }
+
+    /* 3줄만 보이는 뷰포트: quote-display 를 translateY 로 밀어올려서
+       현재 타이핑 중인 줄이 항상 맨 윗줄에 오도록 스크롤한다. */
+    .quote-viewport { position: relative; height: calc(var(--line-height) * 3); overflow: hidden; margin-bottom: 6px; text-align: left; cursor: text; }
+    .quote-display { position: relative; line-height: var(--line-height); font-size: 1.4rem; letter-spacing: 0.5px; color: #646669; transition: transform 0.25s ease; word-break: keep-all; }
+    .quote-display span.char { position: relative; }
+    .correct { color: #d1d0c5; }
+    .incorrect { color: #ca4754; text-decoration: underline; }
+
+    .caret { position: absolute; top: 3px; left: 0; width: 2px; height: 32px; background: var(--mt-yellow); border-radius: 1px; transition: transform 0.08s ease; pointer-events: none; display: none; }
+
+    .hidden-input { position: absolute; top: 0; left: 0; width: 1px; height: 1px; opacity: 0; }
+    .type-hint { font-size: 0.8rem; color: #666; margin-bottom: 12px; }
+    .status-message { margin-top: 10px; font-size: 1rem; color: #ffca28; min-height: 20px; }
+
+    .mode-badge { display: inline-block; margin-top: 6px; padding: 4px 10px; font-size: 0.8rem; background: #263238; border-radius: 12px; color: #80cbc4; }
+    .stats { display: flex; justify-content: space-around; margin-top: 4px; font-size: 1.2rem; }
+
+    /* 상대방 커서: 내 커서와 동일 구조, 파란색 */
+    .caret.opp-caret { background: #2196f3; }
+
+    .result-banner { text-align: left; }
+    .dashboard { display: none; text-align: left; padding: 14px 4px 4px; }
+    .dashboard.show { display: block; }
+    .dash-result-tag { font-size: 1.3rem; font-weight: bold; margin-bottom: 14px; }
+    .dash-result-tag.win { color: #4caf50; }
+    .dash-result-tag.lose { color: #ca4754; }
+    .dash-result-tag.draw { color: #ffca28; }
+    .rating-change { font-size: 1.1rem; margin-top: 8px; font-weight: bold; color: #2196f3; }
+
+    .dash-main { display: flex; gap: 40px; margin-bottom: 14px; }
+    .dash-primary .dash-value { font-size: 3rem; font-weight: bold; color: var(--mt-yellow); line-height: 1; }
+    .dash-primary .dash-label { font-size: 0.85rem; color: #888; text-transform: uppercase; }
+
+    .dash-compare { display: flex; gap: 16px; margin-top: 16px; }
+    .dash-col { flex: 1; background: #1c1c1c; border: 1px solid #333; border-radius: 10px; padding: 14px 16px; }
+    .dash-col.me { border-color: var(--mt-yellow); }
+    .dash-col.opp { border-color: #2196f3; }
+    .dash-col h4 { margin: 0 0 10px; font-size: 0.8rem; letter-spacing: 0.5px; text-transform: uppercase; color: #999; }
+    .dash-col.me h4 { color: var(--mt-yellow); }
+    .dash-col.opp h4 { color: #2196f3; }
+    .dash-stat-row { display: flex; justify-content: space-between; padding: 5px 0; font-size: 0.95rem; border-bottom: 1px solid #2a2a2a; }
+    .dash-stat-row:last-child { border-bottom: none; }
+    .dash-stat-row .k { color: #888; }
+    .dash-stat-row .v { color: #fff; font-weight: bold; }
+
+    /* 경쟁전 시작 시 나 vs 상대 프로필/티어 배너.
+       카운트다운 동안만 보여주고, 타이핑이 시작되면 hidden-state 클래스로 부드럽게 접는다. */
+    .matchup-bar { display: flex; align-items: center; justify-content: space-between; gap: 10px; background: #1a1a1a; border: 1px solid #333; border-radius: 10px; padding: 14px 18px; margin-bottom: 14px; opacity: 1; max-height: 100px; overflow: hidden; transition: opacity 0.35s ease, max-height 0.35s ease, padding 0.35s ease, margin 0.35s ease, border-width 0.35s ease; }
+    .matchup-bar.hidden-state { opacity: 0; max-height: 0; padding-top: 0; padding-bottom: 0; margin-bottom: 0; border-width: 0; pointer-events: none; }
+    .matchup-player { flex: 1; display: flex; align-items: center; gap: 10px; min-width: 0; }
+    .matchup-player.opponent { flex-direction: row-reverse; text-align: right; }
+    .matchup-avatar { flex-shrink: 0; width: 44px; height: 44px; border-radius: 50%; background: #262626; border: 2px solid #555; display: flex; align-items: center; justify-content: center; font-weight: bold; font-size: 1.15rem; color: #fff; }
+    .matchup-info { min-width: 0; }
+    .matchup-info .player-name { font-weight: bold; font-size: 0.95rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .matchup-info .tier-badge { display: inline-flex; align-items: center; gap: 4px; font-size: 0.72rem; font-weight: bold; padding: 2px 9px; border-radius: 10px; margin-top: 4px; border: 1px solid; white-space: nowrap; }
+    .matchup-vs { flex-shrink: 0; font-weight: bold; color: #555; font-size: 0.85rem; padding: 0 6px; }
+
+    /* 프로필 설정 */
+    .user-info-row { display: flex; align-items: center; justify-content: center; gap: 10px; margin-bottom: 15px; }
+    .my-avatar-badge { width: 30px; height: 30px; border-radius: 50%; background: #1c1c1c; border: 1px solid #444; display: flex; align-items: center; justify-content: center; font-size: 1rem; }
+    .btn-profile { background: none; border: 1px solid #444; color: #999; border-radius: 50%; width: 26px; height: 26px; cursor: pointer; font-size: 0.85rem; line-height: 1; }
+    .btn-profile:hover { border-color: var(--mt-yellow); color: var(--mt-yellow); }
+
+    .modal-overlay { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.6); align-items: center; justify-content: center; z-index: 50; }
+    .modal-overlay.show { display: flex; }
+    .modal-box { width: 360px; background: #1c1c1c; border: 1px solid #333; border-radius: 12px; padding: 22px; text-align: left; }
+    .modal-box h3 { margin: 0 0 16px; font-size: 1.1rem; color: var(--mt-yellow); }
+    .modal-label { font-size: 0.8rem; color: #999; margin-bottom: 6px; display: block; }
+    .modal-input { width: 100%; box-sizing: border-box; padding: 10px 12px; font-size: 0.95rem; background: #121212; border: 1px solid #444; border-radius: 6px; color: #fff; margin-bottom: 4px; }
+    .modal-input:focus { outline: none; border-color: var(--mt-yellow); }
+    .modal-hint { font-size: 0.72rem; color: #666; margin-bottom: 16px; }
+    .avatar-grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 8px; margin-bottom: 18px; }
+    .avatar-option { aspect-ratio: 1; display: flex; align-items: center; justify-content: center; font-size: 1.3rem; background: #121212; border: 2px solid #333; border-radius: 8px; cursor: pointer; }
+    .avatar-option:hover { border-color: #666; }
+    .avatar-option.selected { border-color: var(--mt-yellow); background: #262110; }
+    .modal-actions { display: flex; justify-content: flex-end; gap: 8px; }
+    .btn-cancel { background: transparent; border: 1px solid #444; color: #aaa; padding: 9px 16px; border-radius: 6px; cursor: pointer; font-size: 0.9rem; }
+    .btn-save { background: var(--mt-yellow); border: none; color: #121212; font-weight: bold; padding: 9px 16px; border-radius: 6px; cursor: pointer; font-size: 0.9rem; }
+
+    /* 비밀방(프라이빗 룸) 관련 */
+    .private-section { margin-top: 18px; display: flex; flex-direction: column; align-items: center; gap: 10px; }
+    .btn-private { padding: 12px 24px; font-size: 0.95rem; font-weight: bold; background: #1c1c1c; border: 2px solid #6c63ff; color: #6c63ff; border-radius: 10px; cursor: pointer; transition: border-color 0.15s, transform 0.15s; }
+    .btn-private:hover { border-color: #8b83ff; transform: translateY(-2px); }
+    .join-row { display: flex; gap: 8px; align-items: center; }
+    .join-row input { width: 140px; padding: 10px 12px; font-size: 0.95rem; font-weight: bold; letter-spacing: 2px; text-transform: uppercase; background: #121212; border: 2px solid #444; border-radius: 8px; color: #fff; text-align: center; }
+    .join-row input:focus { outline: none; border-color: #6c63ff; }
+    .join-row input::placeholder { letter-spacing: 0; text-transform: none; font-weight: normal; }
+    .btn-join { padding: 10px 16px; font-size: 0.9rem; font-weight: bold; background: #6c63ff; color: #fff; border: none; border-radius: 8px; cursor: pointer; }
+    .btn-join:hover { background: #5a52e0; }
+
+    .room-code-modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.7); align-items: center; justify-content: center; z-index: 60; }
+    .room-code-modal.show { display: flex; }
+    .room-code-box { width: 380px; background: #1c1c1c; border: 1px solid #333; border-radius: 12px; padding: 28px; text-align: center; }
+    .room-code-box h3 { margin: 0 0 12px; font-size: 1.1rem; color: #6c63ff; }
+    .room-code-display { font-size: 2.2rem; font-weight: bold; letter-spacing: 6px; color: #fff; background: #121212; border: 2px solid #6c63ff; border-radius: 8px; padding: 12px 18px; margin: 12px 0; display: inline-block; }
+    .room-code-box .hint { font-size: 0.8rem; color: #888; margin-bottom: 16px; }
+    .btn-copy-link { padding: 10px 20px; font-size: 0.9rem; font-weight: bold; background: var(--mt-yellow); color: #121212; border: none; border-radius: 6px; cursor: pointer; margin-right: 8px; }
+    .btn-copy-link:hover { background: #d4a810; }
+    .btn-close-room { padding: 10px 20px; font-size: 0.9rem; background: transparent; border: 1px solid #555; color: #aaa; border-radius: 6px; cursor: pointer; }
+    .btn-close-room:hover { background: #222; border-color: #777; }
+
+    .room-waiting { margin-top: 12px; padding: 14px; background: #1a1a2e; border: 1px solid #6c63ff; border-radius: 8px; font-size: 0.95rem; color: #aaa; }
+    .room-waiting .code-label { font-size: 0.8rem; color: #6c63ff; margin-bottom: 6px; }
+    .room-waiting .code-value { font-size: 1.4rem; font-weight: bold; letter-spacing: 4px; color: #fff; }
+    .room-waiting .dots::after { content: ''; animation: dots 1.4s steps(4, end) infinite; }
+    @keyframes dots { 0%,20% { content: ''; } 40% { content: '.'; } 60% { content: '..'; } 80%,100% { content: '...'; } }
+
+    /* 리더보드 */
+    .leaderboard-section { margin-bottom: 16px; }
+    /* 상단 헤더 탭: 화면 전체 너비 */
+    .header-tabs { display: flex; width: 100%; margin-bottom: 14px; border-bottom: 2px solid #222; }
+    .header-tab { flex: 1; padding: 12px 0; font-size: 1rem; font-weight: bold; background: transparent; border: none; color: #555; cursor: pointer; transition: color 0.15s, border-color 0.15s; border-bottom: 3px solid transparent; margin-bottom: -2px; }
+    .header-tab:hover { color: #aaa; }
+    .header-tab.active { color: var(--mt-yellow); border-bottom-color: var(--mt-yellow); }
+    .lb-list { max-height: 220px; overflow-y: auto; background: #1a1a1a; border: 1px solid #333; border-radius: 8px; }
+    .lb-list::-webkit-scrollbar { width: 4px; }
+    .lb-list::-webkit-scrollbar-thumb { background: #444; border-radius: 4px; }
+    .lb-row { display: flex; align-items: center; padding: 7px 12px; font-size: 0.85rem; border-bottom: 1px solid #222; }
+    .lb-row:last-child { border-bottom: none; }
+    .lb-row.me { background: rgba(226,183,20,0.1); border-left: 3px solid var(--mt-yellow); }
+    .lb-row.top1 .lb-rank { color: #ffd700; }
+    .lb-row.top2 .lb-rank { color: #c0c0c0; }
+    .lb-row.top3 .lb-rank { color: #cd7f32; }
+    .lb-rank { min-width: 50px; font-weight: bold; color: #666; text-align: left; flex-shrink: 0; }
+    .lb-avatar { margin: 0 8px; font-size: 1rem; }
+    .lb-name { flex: 1; color: #ccc; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .lb-row.me .lb-name { color: var(--mt-yellow); font-weight: bold; }
+    .lb-score { font-weight: bold; color: #fff; margin-left: 8px; min-width: 50px; text-align: right; }
+    .lb-empty { text-align: center; padding: 20px; color: #555; font-size: 0.85rem; }
+
+    /* Report */
+    .btn-report { background: transparent; border: 1px solid #555; color: #888; font-size: 0.72rem; padding: 3px 8px; border-radius: 4px; cursor: pointer; margin-left: 8px; vertical-align: middle; transition: all 0.15s; }
+    .btn-report:hover { border-color: #ca4754; color: #ca4754; }
+    .btn-report:disabled { opacity: 0.4; cursor: not-allowed; }
+    .opp-name-row { display: flex; align-items: center; justify-content: center; gap: 6px; margin-bottom: 10px; }
+    .opp-name-row .opp-label { font-size: 0.85rem; color: #888; }
+    .opp-name-row .opp-name { font-size: 1rem; font-weight: bold; color: #2196f3; }
+    .report-modal-overlay { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.6); align-items: center; justify-content: center; z-index: 70; }
+    .report-modal-overlay.show { display: flex; }
+    .report-modal-box { width: 360px; background: #1c1c1c; border: 1px solid #333; border-radius: 12px; padding: 22px; text-align: left; }
+    .report-modal-box h3 { margin: 0 0 14px; font-size: 1.05rem; color: #ca4754; }
+    .report-option { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border: 1px solid #333; border-radius: 6px; margin-bottom: 6px; cursor: pointer; transition: border-color 0.15s; font-size: 0.9rem; color: #ccc; }
+    .report-option:hover { border-color: #666; }
+    .report-option.selected { border-color: #ca4754; background: rgba(202,71,84,0.08); }
+    .report-option input[type="radio"] { accent-color: #ca4754; }
+
+    /* Lobby header — hidden during in-game */
+    .lobby-header.hidden { display: none !important; }
+
+    /* SPA view switching */
+    .view { display: none; }
+    .view.active { display: block; }
+    .view.hidden { display: none !important; }
+
+    /* Rank/Trophy full-page leaderboard */
+    .lb-fullpage { margin-top: 0; }
+    .lb-fullpage .lb-list { max-height: calc(100vh - 120px); overflow-y: auto; background: #1a1a1a; border: 1px solid #333; border-radius: 10px; }
+    .lb-fullpage .lb-row { padding: 10px 16px; font-size: 0.95rem; }
+    .lb-fullpage .lb-rank { min-width: 60px; font-size: 1.05rem; }
+    .lb-fullpage .lb-avatar { font-size: 1.2rem; margin: 0 10px; }
+    .lb-fullpage .lb-name { font-size: 1rem; }
+    .lb-fullpage .lb-score { font-size: 1.05rem; min-width: 60px; }
+  </style>
+</head>
+<body>
+
+  <div class="container">
+    <!-- 상단 탭 헤더 (in-game 에도 잠깐 숨김) -->
+    <div class="header-tabs" id="headerTabs">
+      <button class="header-tab active" data-view="play" onclick="switchView('play')">🎮 Play</button>
+      <button class="header-tab" data-view="rank" onclick="switchView('rank')">🏆 Rank</button>
+      <button class="header-tab" data-view="trophy" onclick="switchView('trophy')">🎖 Trophy</button>
+    </div>
+
+    <!-- in-game 시 전체 숨김 -->
+    <div id="lobbyHeader">
+
+    <!-- Play 탭: 프로필 + 매칭 UI -->
+    <div class="view active" id="playView">
+      <div class="user-info-row">
+        <div class="my-avatar-badge" id="myAvatarBadge">😀</div>
+        <div class="user-info"><span id="myNameDisplay">Guest</span> · MMR <span id="myRatingDisplay">1000</span></div>
+        <button class="btn-profile" onclick="openProfileModal()" title="Profile Settings">⚙</button>
+      </div>
+
+      <div class="tab-row" id="typeTab">
+        <button class="tab-btn active" id="normalTabBtn" onclick="switchMatchKind(false)">Casual</button>
+        <button class="tab-btn locked" id="rankedTabBtn" onclick="switchMatchKind(true)">
+          Ranked
+          <span class="lock-label" id="rankedLockLabel">🔒 Win 3 Casual matches to unlock</span>
+        </button>
+      </div>
+
+      <div class="unlock-panel" id="unlockPanel">
+        <div class="unlock-panel-head">
+          <span>Unlock Ranked</span>
+          <strong id="unlockCountLabel">0 / 3 Wins</strong>
+        </div>
+        <div class="unlock-bar-bg">
+          <div class="unlock-bar-fill" id="unlockBarFill"></div>
+        </div>
+      </div>
+
+      <h2 id="title">Select Match Duration</h2>
+      <div class="status-message" id="statusMessage"></div>
+      <div class="waiting-controls" id="waitingControls" style="display:none; margin-bottom: 14px;">
+        <button class="btn-restart btn-secondary" onclick="cancelSearch()">✕ Cancel</button>
+      </div>
+
+      <div class="mode-select" id="modeSelect">
+        <div class="mode-buttons" id="mainModeButtons">
+          <button class="btn-mode" onclick="selectMode('time', 30)">
+            <span class="mode-title">⏱ 30s</span>
+            <span class="mode-desc">Fast</span>
+          </button>
+          <button class="btn-mode" onclick="selectMode('time', 60)">
+            <span class="mode-title">⏱ 60s</span>
+            <span class="mode-desc">Standard</span>
+          </button>
+          <button class="btn-mode" onclick="selectMode('time', 120)">
+            <span class="mode-title">⏱ 120s</span>
+            <span class="mode-desc">Long</span>
+          </button>
+        </div>
+
+        <div class="private-section">
+          <button class="btn-private" onclick="startPrivateRoom()">🔗 Create Custom Room</button>
+          <div class="join-row">
+            <input type="text" id="inviteCodeInput" placeholder="Enter room code" maxlength="6" autocomplete="off">
+            <button class="btn-join" onclick="joinPrivateRoom()">Join</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="room-waiting" id="roomWaiting" style="display:none;">
+        <div class="code-label">Invite Code</div>
+        <div class="code-value" id="roomWaitingCode"></div>
+        <div>Waiting for opponent<span class="dots"></span></div>
+        <button class="btn-close-room" onclick="cancelPrivateRoom()" style="margin-top:10px;">✕ Leave Room</button>
+      </div>
+    </div>
+
+    <!-- Rank 탭: MMR 리더보드 전면 -->
+    <div class="view" id="rankView">
+      <div class="lb-fullpage">
+        <div class="lb-list" id="rankLeaderboard">
+          <div class="lb-empty">Loading...</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Trophy 탭: 트로피 리더보드 전면 -->
+    <div class="view" id="trophyView">
+      <div class="lb-fullpage">
+        <div class="lb-list" id="trophyLeaderboard">
+          <div class="lb-empty">Loading...</div>
+        </div>
+      </div>
+    </div>
+    </div><!-- /lobbyHeader -->
+
+    <div class="room-code-modal" id="roomCodeModal">
+      <div class="room-code-box">
+        <h3>🔗 Room Created!</h3>
+        <div class="room-code-display" id="roomCodeDisplay"></div>
+        <div class="hint">Share this link with your friend</div>
+        <div style="display:flex; justify-content:center; gap:8px;">
+          <button class="btn-copy-link" onclick="copyInviteLink()">📋 Copy Link</button>
+          <button class="btn-close-room" onclick="closeRoomModal()">Close</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="game-area" id="gameArea">
+      <div class="mode-badge" id="modeBadge"></div>
+
+      <div class="matchup-bar hidden-state" id="matchupBar">
+        <div class="matchup-player me">
+          <div class="matchup-avatar" id="myAvatar"></div>
+          <div class="matchup-info">
+            <div class="player-name" id="myMatchupName"></div>
+            <div class="tier-badge" id="myTierBadge"></div>
+          </div>
+        </div>
+        <div class="matchup-vs">VS</div>
+        <div class="matchup-player opponent">
+          <div class="matchup-avatar" id="oppAvatar"></div>
+          <div class="matchup-info">
+            <div class="player-name" id="oppMatchupName"></div>
+            <div class="tier-badge" id="oppTierBadge"></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="type-area">
+        <div class="quote-viewport" id="quoteViewport">
+          <div class="quote-display" id="quoteDisplay"></div>
+        </div>
+        <input type="text" class="hidden-input" id="typingInput" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" disabled>
+      </div>
+      <div class="type-hint" id="typeHint">Click and start typing</div>
+
+      <div class="stats">
+        <div>Accuracy: <span id="accuracy">100</span>%</div>
+        <div id="timerLabel">Time: <span id="timer">30</span>s</div>
+      </div>
+
+      <div class="result-banner" id="resultBanner"></div>
+
+      <div class="restart-row" id="restartRow">
+        <button class="btn-restart" onclick="rematchSameMode()">🔁 Rematch</button>
+        <button class="btn-restart btn-secondary" onclick="location.reload()">Change Mode</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="report-modal-overlay" id="reportModalOverlay">
+    <div class="report-modal-box">
+      <h3>⚠ Report Player</h3>
+      <div style="font-size:0.85rem; color:#aaa; margin-bottom:12px;">Select a reason for reporting:</div>
+      <label class="report-option" onclick="selectReportReason('cheating', this)">
+        <input type="radio" name="reportReason" value="cheating"> Cheating / Auto-typer
+      </label>
+      <label class="report-option" onclick="selectReportReason('inappropriate_name', this)">
+        <input type="radio" name="reportReason" value="inappropriate_name"> Inappropriate Name
+      </label>
+      <label class="report-option" onclick="selectReportReason('other', this)">
+        <input type="radio" name="reportReason" value="other"> Other
+      </label>
+      <div class="modal-actions" style="margin-top:16px;">
+        <button class="btn-cancel" onclick="closeReportModal()">Cancel</button>
+        <button class="btn-save" style="background:#ca4754;" onclick="submitReport()">Submit Report</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-overlay" id="profileModalOverlay">
+    <div class="modal-box">
+      <h3>Profile Settings</h3>
+
+      <label class="modal-label">Nickname</label>
+      <input type="text" class="modal-input" id="profileNameInput" maxlength="12" placeholder="Enter nickname (2-12 chars)">
+      <div class="modal-hint">2-12 characters, special chars &lt; &gt; are not allowed.</div>
+
+      <label class="modal-label">Avatar</label>
+      <div class="avatar-grid" id="avatarGrid"></div>
+
+      <div class="modal-actions">
+        <button class="btn-cancel" onclick="closeProfileModal()">Cancel</button>
+        <button class="btn-save" onclick="saveProfile()">Save</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script>
+    const socket = io();
+    const LINE_HEIGHT = 38; // CSS --line-height 와 반드시 동일하게 유지
+    const PLAYER_ID_KEY = 'typingPlayerId';
+
+    let isRanked = false;
+    let currentMode = 'time';
+    let currentDuration = null;
+    let sampleText = "";
+    let serverStartTime = null;
+    let duration = null;
+    let countdownInterval = null;
+    let gameTimerInterval = null;
+    let gameEnded = false;
+    let myRating = 1000;
+    let myTrophies = 0;
+    let myName = '';
+    let myAvatar = '😀';
+    let allowedAvatars = [];
+    let draftAvatar = '😀'; // 모달에서 선택 중인 아바타(저장 전까지는 임시값)
+    let normalWins = 0;
+    let requiredUnlockWins = 3;
+    let rankedUnlocked = false;
+
+    let totalTyped = 0;
+    let totalErrors = 0;
+    let prevVal = "";
+
+    let myCaretEl = null;
+    let oppCaretEl = null;
+    let isCreatingPrivateRoom = false;
+    let privateRoomCode = null;
+    let lastOpponentId = null;
+    let lastRoomId = null;
+    let lastMatchStats = null;
+    let selectedReportReason = null;
+    let reportedMatchIds = new Set();
+
+    // --- Report ---
+    function openReportModal() {
+      selectedReportReason = null;
+      document.querySelectorAll('.report-option').forEach(o => o.classList.remove('selected'));
+      document.querySelectorAll('input[name="reportReason"]').forEach(r => r.checked = false);
+      // 제출 버튼 상태 초기화
+      const submitBtn = document.querySelector('.report-modal-box .btn-save');
+      if (submitBtn) {
+        submitBtn.disabled = false;
+        submitBtn.innerText = 'Submit Report';
+      }
+      document.getElementById('reportModalOverlay').classList.add('show');
+    }
+
+    function closeReportModal() {
+      document.getElementById('reportModalOverlay').classList.remove('show');
+    }
+
+    function selectReportReason(reason, el) {
+      selectedReportReason = reason;
+      document.querySelectorAll('.report-option').forEach(o => o.classList.remove('selected'));
+      if (el) el.closest('.report-option').classList.add('selected');
+    }
+
+    function submitReport() {
+      if (!selectedReportReason) {
+        document.getElementById('statusMessage').innerText = '⚠️ Please select a reason.';
+        return;
+      }
+      if (!lastOpponentId || !lastRoomId) {
+        document.getElementById('statusMessage').innerText = '⚠️ No opponent data available.';
+        closeReportModal();
+        return;
+      }
+
+      if (reportedMatchIds.has(lastRoomId)) {
+        document.getElementById('statusMessage').innerText = '⚠️ You already reported in this match.';
+        closeReportModal();
+        return;
+      }
+
+      // 제출 버튼 비활성화 (중복 클릭 방지)
+      const submitBtn = document.querySelector('.report-modal-box .btn-save');
+      if (submitBtn) {
+        submitBtn.disabled = true;
+        submitBtn.innerText = 'Submitting...';
+      }
+
+      socket.emit('report_player', {
+        targetPlayerId: lastOpponentId,
+        roomId: lastRoomId,
+        reason: selectedReportReason,
+        matchStats: lastMatchStats || {}
+      });
+
+      reportedMatchIds.add(lastRoomId);
+    }
+
+    socket.on('reportResult', (data) => {
+      closeReportModal();
+
+      // 제출 버튼 상태 복원
+      const submitBtn = document.querySelector('.report-modal-box .btn-save');
+      if (submitBtn) {
+        submitBtn.disabled = false;
+        submitBtn.innerText = 'Submit Report';
+      }
+
+      if (data.success) {
+        document.getElementById('statusMessage').innerText = '✅ Report submitted. Thank you!';
+        // 신고 버튼 비활성화
+        const reportBtn = document.getElementById('reportBtn');
+        if (reportBtn) {
+          reportBtn.disabled = true;
+          reportBtn.innerText = 'Reported';
+        }
+      } else {
+        document.getElementById('statusMessage').innerText = '⚠️ ' + (data.message || 'Report failed.');
+      }
+    });
+
+    function getOrCreatePlayerId() {
+      try {
+        let id = localStorage.getItem(PLAYER_ID_KEY);
+        if (!id || !/^[A-Za-z0-9_-]{8,64}$/.test(id)) {
+          if (window.crypto && typeof window.crypto.randomUUID === 'function') {
+            id = window.crypto.randomUUID().replace(/-/g, '');
+          } else {
+            id = 'p' + Math.random().toString(36).slice(2) + Date.now().toString(36);
+          }
+          localStorage.setItem(PLAYER_ID_KEY, id);
+        }
+        return id;
+      } catch (e) {
+        return 'p' + Math.random().toString(36).slice(2) + Date.now().toString(36);
+      }
+    }
+
+    function applyUnlockStatus(data, options) {
+      if (!data) return;
+      const opts = options || {};
+      normalWins = Number.isFinite(data.normalWins) ? data.normalWins : normalWins;
+      requiredUnlockWins = Number.isFinite(data.requiredWins) ? data.requiredWins : requiredUnlockWins;
+      rankedUnlocked = !!data.rankedUnlocked || normalWins >= requiredUnlockWins;
+
+      const rankedBtn = document.getElementById('rankedTabBtn');
+      const lockLabel = document.getElementById('rankedLockLabel');
+      const panel = document.getElementById('unlockPanel');
+      const countLabel = document.getElementById('unlockCountLabel');
+      const barFill = document.getElementById('unlockBarFill');
+      const ratio = requiredUnlockWins > 0 ? Math.min(100, Math.floor((normalWins / requiredUnlockWins) * 100)) : 100;
+
+      rankedBtn.classList.toggle('locked', !rankedUnlocked);
+      lockLabel.innerText = rankedUnlocked ? '' : `🔒 Win ${requiredUnlockWins} Casual matches`;
+      countLabel.innerText = rankedUnlocked ? 'Unlocked' : `${normalWins} / ${requiredUnlockWins} Wins`;
+      barFill.style.width = `${ratio}%`;
+      panel.classList.toggle('hidden', rankedUnlocked && !opts.keepPanel);
+
+      if (rankedUnlocked && isRanked === false) {
+        rankedBtn.classList.remove('active');
+      }
+      if (!rankedUnlocked && isRanked) {
+        switchMatchKind(false, true);
+      }
+
+      if (data.justUnlocked || opts.justUnlocked) {
+        document.getElementById('statusMessage').innerText = `🎉 ${requiredUnlockWins} Casual wins! Ranked is now unlocked.`;
+        panel.classList.remove('hidden');
+        countLabel.innerText = 'Unlocked';
+      }
+    }
+
+    // === 페이지 로드 즉시 localStorage 프로필을 UI에 반영 (Guest 플래시 방지) ===
+    (function loadProfileOnStartup() {
+      const saved = loadSavedProfile();
+      if (saved) {
+        if (saved.name) { myName = saved.name; document.getElementById('myNameDisplay').innerText = saved.name; }
+        if (saved.avatar) { myAvatar = saved.avatar; document.getElementById('myAvatarBadge').innerText = saved.avatar; }
+      }
+    })();
+
+    // 소켓 연결 시마다(재접속 포함) 저장된 프로필을 서버에 전송하고,
+    // 프로필 처리 완료(ACK) 후에만 리더보드를 요청한다.
+    socket.on('connect', () => {
+      const saved = loadSavedProfile();
+      const profileData = { name: (saved && saved.name) || myName, avatar: (saved && saved.avatar) || myAvatar };
+
+      // setProfile에 ACK 콜백을 넘겨 프로필 등록 완료 시점에 리더보드를 요청
+      socket.emit('setProfile', profileData, () => {
+        fetchLeaderboard();
+      });
+
+      socket.emit('identify', { playerId: getOrCreatePlayerId() });
+    });
+
+    socket.on('initUser', (data) => {
+  myRating = data.rating;
+  myTrophies = data.trophies || 0;
+  allowedAvatars = data.allowedAvatars || [];
+  applyUnlockStatus(data);
+
+  // 서버에서 받은 이름/아바타를 사용하되, localStorage에 저장된 프로필이 있으면 우선 적용
+  const saved = loadSavedProfile();
+  if (saved && saved.name) myName = saved.name;
+  else myName = data.name;
+  if (saved && saved.avatar) myAvatar = saved.avatar;
+  else myAvatar = data.avatar;
+
+  updateTopBar();
+  // initUser 수신 시 리더보드도 갱신 (connect ACK보다 먼저 도착할 수 있음)
+  fetchLeaderboard();
+});
+
+    socket.on('unlockStatus', (data) => {
+      applyUnlockStatus(data, { justUnlocked: !!(data && data.justUnlocked) });
+    });
+
+    socket.on('rankedLocked', (data) => {
+      applyUnlockStatus(data);
+      isRanked = false;
+      document.getElementById('normalTabBtn').classList.add('active');
+      document.getElementById('rankedTabBtn').classList.remove('active');
+      document.getElementById('waitingControls').style.display = 'none';
+      document.getElementById('modeSelect').style.display = 'flex';
+      document.getElementById('typeTab').style.display = 'flex';
+      setLobbyVisible(true);
+      backToMainModes();
+      document.getElementById('title').innerText = 'Select Match Duration';
+      document.getElementById('statusMessage').innerText =
+        `🔒 Ranked unlocks after ${requiredUnlockWins} Casual wins. (${normalWins}/${requiredUnlockWins})`;
+    });
+
+    socket.on('trophyUpdate', (data) => {
+  myTrophies = data.trophies;
+  updateTopBar();
+});
+
+socket.on('profileUpdated', (data) => {
+  if (data.nameAccepted !== false && data.name) myName = data.name;
+  if (data.avatarAccepted !== false && data.avatar) myAvatar = data.avatar;
+  updateTopBar();
+});
+
+function updateTopBar() {
+  document.getElementById('myRatingDisplay').innerText = myRating;
+  document.getElementById('myNameDisplay').innerText = myName;
+  document.getElementById('myAvatarBadge').innerText = myAvatar;
+
+  let trophySpan = document.getElementById('myTrophyDisplay');
+  if (!trophySpan) {
+    const userInfo = document.querySelector('.user-info');
+    if (userInfo) {
+      userInfo.innerHTML = `<span id="myNameDisplay">${myName}</span> · MMR <span id="myRatingDisplay">${myRating}</span> · 🏆 <span id="myTrophyDisplay">${myTrophies}</span>`;
+    }
+  } else {
+    trophySpan.innerText = myTrophies;
+  }
+}
+
+    function loadSavedProfile() {
+      try {
+        const raw = localStorage.getItem('typingProfile');
+        return raw ? JSON.parse(raw) : null;
+      } catch (e) {
+        return null;
+      }
+    }
+
+    function saveProfileToStorage(name, avatar) {
+      try {
+        localStorage.setItem('typingProfile', JSON.stringify({ name, avatar }));
+      } catch (e) {
+        // localStorage 사용 불가 환경이면 조용히 무시 (프로필은 세션 동안만 유지됨)
+      }
+    }
+
+    function openProfileModal() {
+      draftAvatar = myAvatar;
+      document.getElementById('profileNameInput').value = myName;
+      renderAvatarGrid();
+      document.getElementById('profileModalOverlay').classList.add('show');
+    }
+
+    function closeProfileModal() {
+      document.getElementById('profileModalOverlay').classList.remove('show');
+    }
+
+    function renderAvatarGrid() {
+      const grid = document.getElementById('avatarGrid');
+      grid.innerHTML = '';
+      allowedAvatars.forEach((emoji) => {
+        const cell = document.createElement('div');
+        cell.className = 'avatar-option' + (emoji === draftAvatar ? ' selected' : '');
+        cell.innerText = emoji;
+        cell.onclick = () => {
+          draftAvatar = emoji;
+          renderAvatarGrid();
+        };
+        grid.appendChild(cell);
+      });
+    }
+
+    function saveProfile() {
+      const nameInput = document.getElementById('profileNameInput').value.trim();
+
+      // 클라이언트 측 유효성 검사
+      if (nameInput.length < 2 || nameInput.length > 12) {
+        document.getElementById('statusMessage').innerText = 'Nickname must be 2-12 characters.';
+        return;
+      }
+      if (/[<>]/.test(nameInput)) {
+        document.getElementById('statusMessage').innerText = 'Nickname cannot contain < or >.';
+        return;
+      }
+
+      // 로컬 상태 즉시 갱신
+      myName = nameInput;
+      myAvatar = draftAvatar;
+
+      // localStorage에 저장 (새로고침后에도 유지)
+      saveProfileToStorage(myName, myAvatar);
+
+      // 서버에 전송
+      socket.emit('setProfile', { name: myName, avatar: myAvatar });
+
+      // UI 즉시 반영
+      updateTopBar();
+      // 리더보드도 즉시 갱신 (내 이름이 반영되도록)
+      fetchLeaderboard();
+      closeProfileModal();
+    }
+
+    function switchMatchKind(ranked, silent) {
+      if (ranked && !rankedUnlocked) {
+        document.getElementById('statusMessage').innerText =
+          `🔒 Ranked unlocks after ${requiredUnlockWins} Casual wins. (${normalWins}/${requiredUnlockWins})`;
+        return;
+      }
+      isRanked = ranked;
+      document.getElementById('normalTabBtn').classList.toggle('active', !ranked);
+      document.getElementById('rankedTabBtn').classList.toggle('active', ranked);
+      if (!silent) document.getElementById('statusMessage').innerText = '';
+    }
+
+    function backToMainModes() {
+      document.getElementById('mainModeButtons').style.display = 'flex';
+      isCreatingPrivateRoom = false;
+    }
+
+    // --- 비밀방 관련 함수 ---
+    function startPrivateRoom() {
+      isCreatingPrivateRoom = true;
+      document.getElementById('statusMessage').innerText = 'Select duration for custom room';
+      document.getElementById('mainModeButtons').style.display = 'flex';
+    }
+
+    function joinPrivateRoom() {
+      const code = document.getElementById('inviteCodeInput').value.toUpperCase().trim();
+      if (!code || code.length < 4) {
+        document.getElementById('statusMessage').innerText = 'Please enter a valid room code.';
+        return;
+      }
+      socket.emit('joinRoom', { code });
+      document.getElementById('statusMessage').innerText = 'Joining room...';
+      document.getElementById('waitingControls').style.display = 'block';
+      document.getElementById('modeSelect').style.display = 'none';
+      document.getElementById('typeTab').style.display = 'none';
+      setLobbyVisible(false);
+      document.getElementById('title').innerText = 'Joining room...';
+    }
+
+    function cancelPrivateRoom() {
+      socket.emit('cancelRoom');
+      privateRoomCode = null;
+      document.getElementById('roomWaiting').style.display = 'none';
+      document.getElementById('modeSelect').style.display = 'flex';
+      document.getElementById('typeTab').style.display = 'flex';
+      setLobbyVisible(true);
+      document.getElementById('title').innerText = 'Select Match Duration';
+      document.getElementById('statusMessage').innerText = '';
+    }
+
+    function copyInviteLink() {
+      const url = window.location.origin + window.location.pathname + '?room=' + privateRoomCode;
+      if (navigator.clipboard) {
+        navigator.clipboard.writeText(url).then(() => {
+          document.getElementById('statusMessage').innerText = '✅ Link copied!';
+        });
+      } else {
+        // fallback
+        const ta = document.createElement('textarea');
+        ta.value = url; document.body.appendChild(ta);
+        ta.select(); document.execCommand('copy'); document.body.removeChild(ta);
+        document.getElementById('statusMessage').innerText = '✅ Link copied!';
+      }
+    }
+
+    function closeRoomModal() {
+      document.getElementById('roomCodeModal').classList.remove('show');
+    }
+
+    // URL 파라미터로 ?room=CODE 접속 시 자동 입장
+    function checkUrlRoomParam() {
+      const params = new URLSearchParams(window.location.search);
+      const roomCode = params.get('room');
+      if (roomCode) {
+        document.getElementById('inviteCodeInput').value = roomCode.toUpperCase();
+        joinPrivateRoom();
+      }
+    }
+
+    function resetGameState() {
+      clearInterval(countdownInterval);
+      clearInterval(gameTimerInterval);
+      gameEnded = false;
+      totalTyped = 0;
+      totalErrors = 0;
+      prevVal = "";
+      document.getElementById('typingInput').value = '';
+      document.getElementById('typingInput').disabled = true;
+      document.getElementById('quoteDisplay').innerHTML = '';
+      document.getElementById('quoteDisplay').style.transform = 'translateY(0px)';
+      document.getElementById('matchupBar').classList.add('hidden-state');
+      // 상대방 커서 숨기기
+      if (oppCaretEl) oppCaretEl.style.display = 'none';
+    }
+
+    function selectMode(mode, selectedDuration) {
+      resetGameState();
+      currentMode = mode;
+      currentDuration = mode === 'time' ? selectedDuration : null;
+
+      // 비밀방 만들기 모드이면 방 생성
+      if (isCreatingPrivateRoom) {
+        isCreatingPrivateRoom = false;
+        socket.emit('createRoom', { mode, duration: currentDuration });
+        return;
+      }
+
+      socket.emit('selectMode', { mode, duration: currentDuration, isRanked });
+
+      document.getElementById('modeSelect').style.display = 'none';
+      document.getElementById('typeTab').style.display = 'none';
+      setLobbyVisible(false);
+      document.getElementById('title').innerText = "Finding opponent...";
+      document.getElementById('statusMessage').innerText = isRanked ? "Searching for a similar rank..." : "Looking for an opponent...";
+      document.getElementById('waitingControls').style.display = 'block';
+    }
+
+    function rematchSameMode() {
+      resetGameState();
+      document.getElementById('resultBanner').innerHTML = '';
+      document.getElementById('resultBanner').className = 'result-banner';
+      document.getElementById('restartRow').style.display = 'none';
+      setLobbyVisible(false);
+      document.getElementById('title').innerText = "Finding opponent...";
+      document.getElementById('waitingControls').style.display = 'block';
+
+      socket.emit('selectMode', { mode: currentMode, duration: currentDuration, isRanked });
+    }
+
+    // 매칭 대기 중 취소: 서버 대기열에서 제거하고 모드 선택 화면으로 복귀
+    function cancelSearch() {
+      socket.emit('cancelSearch');
+      resetGameState();
+      document.getElementById('waitingControls').style.display = 'none';
+      document.getElementById('gameArea').style.display = 'none';
+      document.getElementById('resultBanner').innerHTML = '';
+      document.getElementById('resultBanner').className = 'result-banner';
+      document.getElementById('restartRow').style.display = 'none';
+      backToMainModes();
+      document.getElementById('modeSelect').style.display = 'flex';
+      document.getElementById('typeTab').style.display = 'flex';
+      setLobbyVisible(true);
+      document.getElementById('title').innerText = "Select Match Duration";
+      document.getElementById('statusMessage').innerText = '';
+      applyUnlockStatus({
+        normalWins,
+        requiredWins: requiredUnlockWins,
+        rankedUnlocked
+      });
+    }
+
+    function renderQuote() {
+      const qd = document.getElementById('quoteDisplay');
+      qd.innerHTML = '';
+      sampleText.split('').forEach(char => {
+        const span = document.createElement('span');
+        span.className = 'char';
+        span.innerText = char;
+        qd.appendChild(span);
+      });
+
+      myCaretEl = document.createElement('div');
+      myCaretEl.className = 'caret';
+      qd.appendChild(myCaretEl);
+
+      oppCaretEl = document.createElement('div');
+      oppCaretEl.className = 'caret opp-caret';
+      qd.appendChild(oppCaretEl);
+
+      positionCaret(myCaretEl, 0);
+      updateViewportScroll(0);
+    }
+
+    function positionCaret(caretEl, charIndex) {
+      const spans = document.querySelectorAll('span.char');
+      if (spans.length === 0 || !caretEl) return;
+      if (charIndex >= spans.length) {
+        const last = spans[spans.length - 1];
+        caretEl.style.transform = `translate(${last.offsetLeft + last.offsetWidth}px, ${last.offsetTop}px)`;
+      } else {
+        const target = spans[Math.max(0, charIndex)];
+        caretEl.style.transform = `translate(${target.offsetLeft}px, ${target.offsetTop}px)`;
+      }
+      caretEl.style.display = 'block';
+    }
+
+    // 현재 charIndex 가 위치한 줄(row)을 계산한다.
+    function getRowForIndex(charIndex) {
+      const spans = document.querySelectorAll('span.char');
+      if (spans.length === 0) return 0;
+      const idx = Math.min(Math.max(0, charIndex), spans.length - 1);
+      const target = spans[idx];
+      return Math.round(target.offsetTop / LINE_HEIGHT);
+    }
+
+    // 내가 타이핑 중인 줄이 항상 뷰포트 맨 위에 오도록 quote-display 를 밀어올린다.
+    // (3줄짜리 뷰포트: 현재 줄 + 다음 두 줄이 항상 보임)
+    function updateViewportScroll(row) {
+      const qd = document.getElementById('quoteDisplay');
+      const offset = Math.max(0, row) * LINE_HEIGHT;
+      qd.style.transform = `translateY(-${offset}px)`;
+    }
+
+    function startCountdown() {
+      clearInterval(countdownInterval);
+      countdownInterval = setInterval(() => {
+        const remainingMs = serverStartTime - Date.now();
+        if (remainingMs <= 0) {
+          clearInterval(countdownInterval);
+          document.getElementById('title').innerText = "Start typing!";
+          const ti = document.getElementById('typingInput');
+          ti.disabled = false;
+          ti.focus();
+          // 카운트다운이 끝나 타이핑이 시작되면 매치업 배너를 부드럽게 접어서 시야를 확보한다.
+          document.getElementById('matchupBar').classList.add('hidden-state');
+          startGameTimer();
+        } else {
+          document.getElementById('title').innerText = `Starting in ${Math.ceil(remainingMs / 1000)}...`;
+        }
+      }, 100);
+    }
+
+    function startGameTimer() {
+      clearInterval(gameTimerInterval);
+      gameTimerInterval = setInterval(() => {
+        const elapsed = (Date.now() - serverStartTime) / 1000;
+        const remaining = Math.max(0, Math.round(duration - elapsed));
+        document.getElementById('timer').innerText = remaining;
+        if (remaining <= 0) document.getElementById('typingInput').disabled = true;
+      }, 200);
+    }
+
+    document.getElementById('profileModalOverlay').addEventListener('click', (e) => {
+      if (e.target.id === 'profileModalOverlay') closeProfileModal();
+    });
+
+    document.getElementById('reportModalOverlay').addEventListener('click', (e) => {
+      if (e.target.id === 'reportModalOverlay') closeReportModal();
+    });
+
+    document.getElementById('quoteViewport').addEventListener('click', () => {
+      if (!gameEnded) document.getElementById('typingInput').focus();
+    });
+
+    // 글자로 입력되지 않는 기능키(Functional Keys) 목록
+    const NON_TEXT_KEYS = new Set([
+      'Shift','Control','Alt','Meta','CapsLock','Tab','Escape',
+      'ScrollLock','NumLock','Pause',
+      'ArrowUp','ArrowDown','ArrowLeft','ArrowRight',
+      'Home','End','PageUp','PageDown','Insert','Delete',
+      'F1','F2','F3','F4','F5','F6','F7','F8','F9','F10','F11','F12'
+    ]);
+
+    document.getElementById('typingInput').addEventListener('keydown', (e) => {
+      if (gameEnded) return;
+      // 글자로 입력되지 않는 키는 preventDefault로 input 이벤트가 생기지 않게 차단
+      if (NON_TEXT_KEYS.has(e.key)) {
+        e.preventDefault();
+        return;
+      }
+      // 방향키/기능키 중에 텍스트 삽입이 아예 없는 키도 차단
+      if (e.key.startsWith('Arrow') || e.key === 'Tab' || e.key === 'Escape' ||
+          e.key === 'Enter' && e.target !== document.getElementById('typingInput')) {
+        e.preventDefault();
+        return;
+      }
+    });
+
+    document.getElementById('typingInput').addEventListener('input', (e) => {
+      if (gameEnded) return;
+      // IME 조합 중에는 무시
+      if (e.isComposing) return;
+
+      let val = e.target.value;
+
+      // 문장 전체 길이를 넘는 입력은 잘라낸다.
+      if (val.length > sampleText.length) {
+        val = val.substring(0, sampleText.length);
+        e.target.value = val;
+      }
+
+      // 현재 입력값 기준으로 남아있는 오타 수 재계산 (누적 아님)
+      let currentErrors = 0;
+      for (let i = 0; i < val.length; i++) {
+        if (val[i] !== sampleText[i]) currentErrors++;
+      }
+
+      // 기본 키 입력: 새로 추가된 글자 수만큼 totalTyped 누적 증가, 오타 발견 시 totalErrors 누적 증가
+      if (val.length > prevVal.length) {
+        const addedCount = val.length - prevVal.length;
+        totalTyped += addedCount;
+        for (let i = prevVal.length; i < val.length; i++) {
+          if (val[i] !== sampleText[i]) totalErrors++;
+        }
+      }
+      // 백스페이스/삭제로 줄어든 경우: totalTyped는 누적 개념으로 감소시키지 않음
+      // (총 타이핑 횟수는 되돌리지 않음). currentErrors는 재계산 값이므로 totalErrors와는 다름.
+      else if (val.length < prevVal.length) {
+        // 백스페이스로 지웠더라도 이미 눌린 키로 인한 오타 누적은 유지
+        totalTyped += 0; // 변화 없음 (총 입력 시도 횟수는 유지)
+      }
+      prevVal = val;
+
+      // 현재 화면 기준 유효 글자 수 (Net Correct Chars): 입력 글자 수 - 남아있는 오타 수
+      const netCorrect = Math.max(0, val.length - currentErrors);
+
+      const spans = document.querySelectorAll('span.char');
+      spans.forEach((span, idx) => {
+        const char = val[idx];
+        if (char == null) span.className = 'char';
+        else if (char === sampleText[idx]) span.className = 'char correct';
+        else span.className = 'char incorrect';
+      });
+
+      positionCaret(myCaretEl, val.length);
+      updateViewportScroll(getRowForIndex(val.length));
+
+      // 누적 기준 정확도: totalTyped 대비 totalErrors (한 번 오타면 영원히 100% 불가)
+      const accuracy = totalTyped > 0
+        ? Math.max(0, Math.round(((totalTyped - totalErrors) / totalTyped) * 100))
+        : 100;
+
+      document.getElementById('accuracy').innerText = accuracy;
+
+      const percent = (val.length === sampleText.length) ? 100 : Math.floor((val.length / sampleText.length) * 100);
+
+      // 서버에 누적 기준과 현재 netCorrect를 함께 전송
+      socket.emit('progress', {
+        percent,
+        accuracy,
+        charIndex: val.length,
+        netCorrect,
+        totalTyped,
+        totalErrors
+      });
+    });
+
+    // 색상 hex 를 배지 배경용 rgba 로 변환
+    function hexToRgba(hex, alpha) {
+      const bigint = parseInt(hex.replace('#', ''), 16);
+      const r = (bigint >> 16) & 255, g = (bigint >> 8) & 255, b = bigint & 255;
+      return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+    }
+
+    // --- SPA View Switching ---
+    let currentView = 'play';
+    let currentLeaderboardTab = 'rank';
+
+    // 헤더 탭 + 로비 전체를 동시에 show/hide (in-game 시 사용)
+    function setLobbyVisible(visible) {
+      const lobby = document.getElementById('lobbyHeader');
+      const tabs = document.getElementById('headerTabs');
+      if (visible) {
+        lobby.classList.remove('hidden');
+        tabs.style.display = '';
+      } else {
+        lobby.classList.add('hidden');
+        tabs.style.display = 'none';
+      }
+    }
+
+    function switchView(view) {
+      currentView = view;
+      // 탭 active 토글
+      document.querySelectorAll('.header-tab').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.view === view);
+      });
+      // 뷰 show/hide
+      document.getElementById('playView').classList.toggle('active', view === 'play');
+      document.getElementById('rankView').classList.toggle('active', view === 'rank');
+      document.getElementById('trophyView').classList.toggle('active', view === 'trophy');
+      // 리더보드 탭 전환 시 데이터 요청
+      if (view === 'rank' || view === 'trophy') {
+        currentLeaderboardTab = view;
+        fetchLeaderboard();
+      }
+    }
+
+    function fetchLeaderboard() {
+      if (!socket.connected) return;
+      socket.emit('requestLeaderboard', { sortBy: currentLeaderboardTab });
+    }
+
+    // 기존 switchLeaderboardTab 은 switchView 로 대체
+    function switchLeaderboardTab(sortBy) { switchView(sortBy); }
+
+    socket.on('leaderboardData', (data) => {
+      // 어떤 탭의 리더보드인지에 따라 해당 요소에 렌더링
+      const targetId = data.sortBy === 'rank' ? 'rankLeaderboard' : 'trophyLeaderboard';
+      const list = document.getElementById(targetId);
+      if (!list) return;
+      if (!data.entries || data.entries.length === 0) {
+        list.innerHTML = '<div class="lb-empty">No records yet.</div>';
+        return;
+      }
+
+      let html = '';
+      data.entries.forEach((entry, idx) => {
+        const rank = idx + 1;
+        const medals = ['🥇','🥈','🥉'];
+        const rankDisplay = rank <= 3 ? `${medals[rank-1]} #${rank}` : `#${rank}`;
+        const rowClass = 'lb-row' + (entry.isMe ? ' me' : '') + (rank === 1 ? ' top1' : rank === 2 ? ' top2' : rank === 3 ? ' top3' : '');
+        const score = data.sortBy === 'rank' ? entry.rating : entry.trophies;
+        html += `<div class="${rowClass}">
+          <span class="lb-rank">${rankDisplay}</span>
+          <span class="lb-avatar">${entry.avatar}</span>
+          <span class="lb-name">${entry.name}</span>
+          <span class="lb-score">${score}</span>
+        </div>`;
+      });
+      list.innerHTML = html;
+    });
+
+    // 초기 리더보드 로드는 connect 핸들러의 setProfile ACK 콜백에서 처리됨.
+
+    // URL 파라미터 체크 (비밀방 자동 입장)
+    checkUrlRoomParam();
+
+    // 경쟁전 시작 시 나 vs 상대 프로필(이름/레이팅/티어) 배너를 채워서 보여준다.
+    function renderMatchupBar(data) {
+  const myAvatarEmoji = data.myAvatar || '😀';
+  const oppAvatarEmoji = data.opponentAvatar || '👤';
+
+  const myAvatarEl = document.getElementById('myAvatar');
+  myAvatarEl.innerText = myAvatarEmoji;
+  
+  const oppAvatarEl = document.getElementById('oppAvatar');
+  oppAvatarEl.innerText = oppAvatarEmoji;
+
+  document.getElementById('myMatchupName').innerText = data.myName || 'Me';
+  document.getElementById('oppMatchupName').innerText = data.opponentName || 'Opponent';
+
+  const myTierEl = document.getElementById('myTierBadge');
+  myTierEl.innerText = isRanked ? `MMR ${data.myRating}` : `🏆 ${data.myTrophies || 0}`;
+
+  const oppTierEl = document.getElementById('oppTierBadge');
+  oppTierEl.innerText = isRanked ? `MMR ${data.opponentRating}` : `🏆 ${data.opponentTrophies || 0}`;
+
+  document.getElementById('matchupBar').classList.remove('hidden-state');
+}
+
+    socket.on('gameStart', (data) => {
+      resetGameState();
+      currentMode = data.mode;
+      sampleText = data.text;
+      duration = data.duration;
+      serverStartTime = data.startTime;
+
+      document.getElementById('modeSelect').style.display = 'none';
+      document.getElementById('waitingControls').style.display = 'none';
+      document.getElementById('gameArea').style.display = 'block';
+      setLobbyVisible(false);
+      document.getElementById('modeBadge').innerText = `${data.isRanked ? '[Ranked] ' : '[Casual] '}${duration}s`;
+
+      document.getElementById('statusMessage').innerText = "Opponent found!";
+      document.getElementById('resultBanner').innerHTML = '';
+      document.getElementById('restartRow').style.display = 'none';
+
+      // 매치업(상대 프로필) 배너는 일반전/경쟁전 모두 표시한다.
+      if (data.myTier && data.opponentTier) {
+        renderMatchupBar(data);
+      }
+
+      renderQuote();
+      startCountdown();
+    });
+
+    socket.on('opponentProgress', (data) => {
+      // 상대방 파란색 커서를 현재 글자 위치로 이동
+      if (oppCaretEl) positionCaret(oppCaretEl, data.charIndex || 0);
+    });
+
+    // --- 비밀방 이벤트 핸들러 ---
+    socket.on('roomCreated', (data) => {
+      privateRoomCode = data.code;
+      document.getElementById('roomCodeDisplay').innerText = data.code;
+      document.getElementById('roomCodeModal').classList.add('show');
+      // 대기 화면 표시
+      document.getElementById('roomWaitingCode').innerText = data.code;
+      document.getElementById('roomWaiting').style.display = 'block';
+      document.getElementById('modeSelect').style.display = 'none';
+      document.getElementById('typeTab').style.display = 'none';
+      setLobbyVisible(false);
+      document.getElementById('title').innerText = 'Waiting in room...';
+      document.getElementById('statusMessage').innerText = '';
+    });
+
+    socket.on('roomJoined', (data) => {
+      privateRoomCode = data.code;
+      document.getElementById('title').innerText = 'Opponent joining soon...';
+      document.getElementById('statusMessage').innerText = '';
+    });
+
+    socket.on('roomOpponentJoined', () => {
+      document.getElementById('statusMessage').innerText = 'Opponent joined the room!';
+    });
+
+    socket.on('customRoomCountdown', (data) => {
+      closeRoomModal();
+      document.getElementById('roomWaiting').style.display = 'none';
+      document.getElementById('statusMessage').innerText = '';
+      let sec = data.seconds;
+      document.getElementById('title').innerText = `Starting in ${sec}...`;
+      document.getElementById('gameArea').style.display = 'block';
+      document.getElementById('modeSelect').style.display = 'none';
+      document.getElementById('typeTab').style.display = 'none';
+      const cd = setInterval(() => {
+        sec--;
+        if (sec <= 0) { clearInterval(cd); } else {
+          document.getElementById('title').innerText = `Starting in ${sec}...`;
+        }
+      }, 1000);
+    });
+
+    socket.on('roomError', (data) => {
+      document.getElementById('statusMessage').innerText = '⚠️ ' + (data.message || 'Room error');
+      document.getElementById('waitingControls').style.display = 'none';
+      document.getElementById('modeSelect').style.display = 'flex';
+      document.getElementById('typeTab').style.display = 'flex';
+      setLobbyVisible(true);
+      document.getElementById('title').innerText = 'Select Match Duration';
+      document.getElementById('roomWaiting').style.display = 'none';
+      privateRoomCode = null;
+    });
+
+    function renderCompareCard(label, colClass, stats) {
+      return `
+        <div class="dash-col ${colClass}">
+          <h4>${label}</h4>           <div class="dash-stat-row"><span class="k">Accuracy</span><span class="v">${stats.accuracy}%</span></div>
+           <div class="dash-stat-row"><span class="k">Net Chars</span><span class="v">${stats.netCorrect}</span></div>
+        </div>
+      `;
+    }
+
+    socket.on('gameOver', (data) => {
+      gameEnded = true;
+      clearInterval(gameTimerInterval);
+      document.getElementById('typingInput').disabled = true;
+
+      // 신고용 데이터 저장
+      lastOpponentId = data.opponentId || null;
+      lastRoomId = data.roomId || null;
+      lastMatchStats = { myStats: data.myStats, opponentStats: data.opponentStats, result: data.result, duration: duration };
+
+      const tagClass = data.result === 'win' ? 'win' : data.result === 'lose' ? 'lose' : 'draw';
+      const tagText = data.result === 'win' ? '🏆 WIN' : data.result === 'lose' ? '😢 LOSE' : '🤝 DRAW';
+
+      let changeHtml = '';
+      if (data.ratingData) {
+        myRating = data.ratingData.new;
+        const diff = data.ratingData.diff;
+        const sign = diff >= 0 ? '+' : '';
+        changeHtml = `<div class="rating-change">MMR Change: ${sign}${diff} (${data.ratingData.new})</div>`;
+      }
+      if (data.trophyData) {
+        myTrophies = data.trophyData.new;
+        if (!data.ratingData) {
+          const diff = data.trophyData.diff;
+          const sign = diff >= 0 ? '+' : '';
+          changeHtml = `<div class="rating-change" style="color:var(--mt-yellow);">🏆 Trophy Change: ${sign}${diff} (${data.trophyData.new})</div>`;
+        }
+      }
+      updateTopBar();
+
+      applyUnlockStatus(data.unlock, { justUnlocked: !!data.justUnlocked, keepPanel: true });
+
+      const matchKey = lastRoomId || '';
+      const alreadyReported = reportedMatchIds.has(matchKey);
+      const oppName = data.opponentName || 'Opponent';
+
+      document.getElementById('resultBanner').innerHTML = `
+        <div class="dash-result-tag ${tagClass}">${tagText}</div>
+        <div class="opp-name-row">
+          <span class="opp-label">vs</span>
+          <span class="opp-name">${oppName}</span>
+          <button class="btn-report" id="reportBtn" onclick="openReportModal()" ${alreadyReported ? 'disabled' : ''}>${alreadyReported ? 'Reported' : '⚠ Report'}</button>
+        </div>
+        ${changeHtml}
+        <div class="dash-main">
+          <div class="dash-primary">             <div class="dash-value">${data.myStats.netCorrect}</div>
+             <div class="dash-label">Final Score (Net Chars)</div>
+          </div>
+        </div>
+        <div class="dash-compare">
+          ${renderCompareCard('You', 'me', data.myStats)}
+          ${renderCompareCard('Opponent', 'opp', data.opponentStats)}
+        </div>
+      `;
+      document.getElementById('resultBanner').className = 'result-banner dashboard show';
+      document.getElementById('restartRow').style.display = 'block';
+      setLobbyVisible(true);
+    });
+
+    socket.on('opponentLeft', (data) => {
+      gameEnded = true;
+      document.getElementById('typingInput').disabled = true;
+      document.getElementById('resultBanner').innerHTML = `<div class="dash-result-tag win">🏆 WIN (Opponent left)</div>`;
+      document.getElementById('resultBanner').className = 'result-banner dashboard show';
+      document.getElementById('restartRow').style.display = 'block';
+      setLobbyVisible(true);
+      if (data) applyUnlockStatus(data.unlock, { justUnlocked: !!data.justUnlocked, keepPanel: true });
+    });
+  </script>
+</body>
+</html>

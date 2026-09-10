@@ -1,0 +1,400 @@
+// server.js
+const express = require('express');
+const http = require('http');
+const { Server } = require('socket.io');
+const path = require('path');
+
+const app = express();
+const server = http.createServer(app);
+const io = new Server(server, { cors: { origin: '*' } });
+
+const PORT = process.env.PORT || 3000;
+app.use(express.static(path.join(__dirname, 'public')));
+
+const timeModeWordPool = [
+  "the", "be", "to", "of", "and", "a", "in", "that", "have", "it",
+  "for", "not", "on", "with", "he", "as", "you", "do", "at", "this",
+  "but", "his", "by", "from", "they", "we", "say", "her", "she", "or",
+  "an", "will", "my", "one", "all", "would", "there", "their", "what", "so",
+  "up", "out", "if", "about", "who", "get", "which", "go", "me", "when",
+  "make", "can", "like", "time", "no", "just", "him", "know", "take", "people",
+  "into", "year", "your", "good", "some", "could", "them", "see", "other", "than",
+  "then", "now", "look", "only", "come", "its", "over", "think", "also", "back",
+  "after", "use", "two", "how", "our", "work", "first", "well", "way", "even",
+  "new", "want", "because", "any", "these", "give", "day", "most", "us", "code",
+  "program", "system", "run", "fast", "type", "keyboard", "match", "win", "play", "speed"
+];
+
+const ALLOWED_TIME_DURATIONS = [30, 60, 120];
+const DEFAULT_TIME_DURATION = 60;
+const COUNTDOWN_MS = 3000;
+const WORDS_MODE_TIMEOUT_MS = 5 * 60 * 1000;
+
+const userRatings = {};
+const userNames = {};
+const userAvatars = {};
+const waitingNormalPlayers = {};
+
+// 프로필에서 선택 가능한 아바타 이모지 화이트리스트.
+// 클라이언트가 임의 문자열을 보내도 여기 없으면 서버가 거부한다.
+const ALLOWED_AVATARS = ['😀', '😎', '🤖', '🐱', '🐶', '🦊', '🐼', '🐵', '🔥', '⚡', '🎯', '🚀'];
+const DEFAULT_AVATAR = ALLOWED_AVATARS[0];
+const NICKNAME_MIN_LEN = 2;
+const NICKNAME_MAX_LEN = 12;
+const waitingRankedPlayers = [];
+const rooms = {};
+
+// LoL 스타일 티어 시스템: 레이팅 구간별로 아이언~챌린저를 부여한다.
+const TIERS = [
+  { min: 1900, label: '챌린저', color: '#f97316', icon: '🔥' },
+  { min: 1700, label: '마스터', color: '#a855f7', icon: '👑' },
+  { min: 1500, label: '다이아몬드', color: '#38bdf8', icon: '💎' },
+  { min: 1300, label: '플래티넘', color: '#14b8a6', icon: '💠' },
+  { min: 1100, label: '골드', color: '#e2b714', icon: '🥇' },
+  { min: 900, label: '실버', color: '#c0c0c0', icon: '🥈' },
+  { min: 700, label: '브론즈', color: '#cd7f32', icon: '🥉' },
+  { min: -Infinity, label: '아이언', color: '#8b8f98', icon: '⛓️' }
+];
+
+function getTierInfo(rating) {
+  const safeRating = Number.isFinite(rating) ? rating : 1000;
+  return TIERS.find((t) => safeRating >= t.min) || TIERS[TIERS.length - 1];
+}
+
+
+function timeModeWordCount(duration) {
+  return Math.max(200, Math.ceil(duration * 6));
+}
+
+// 두 단어가 "너무 치기 쉬운 조합"인지 판정
+function isEasyTransition(prevWord, nextWord) {
+  if (!prevWord) return false;
+  if (prevWord === nextWord) return true; // 같은 단어 연속
+  if (prevWord.length <= 3 && nextWord.length <= 3) return true; // 짧은 단어끼리 연속 (예: "of the")
+  if (prevWord[prevWord.length - 1] === nextWord[0]) return true; // 앞단어 끝글자 = 다음단어 첫글자
+  return false;
+}
+
+function pickNextWord(pool, prevWord) {
+  const candidates = pool.filter(w => !isEasyTransition(prevWord, w));
+  const source = candidates.length > 0 ? candidates : pool; // 후보가 없으면 제약 풀어줌 (무한루프 방지)
+  return source[Math.floor(Math.random() * source.length)];
+}
+
+function generateRandomText(targetWordCount) {
+  const words = [];
+  let prevWord = null;
+  for (let i = 0; i < targetWordCount; i++) {
+    const word = pickNextWord(timeModeWordPool, prevWord);
+    words.push(word);
+    prevWord = word;
+  }
+  return words.join(' ');
+}
+
+function generateUniqueText(mode, duration, previousText = '') {
+  const targetCount = mode === 'words' ? (40 + Math.floor(Math.random() * 11)) : timeModeWordCount(duration);
+  let newText = generateRandomText(targetCount);
+  let attempts = 0;
+  while (newText === previousText && attempts < 10) {
+    newText = generateRandomText(targetCount);
+    attempts++;
+  }
+  return newText;
+}
+
+function calculateNewRatings(winnerRating, loserRating) {
+  const K = 32;
+  const expectedWinner = 1 / (1 + Math.pow(10, (loserRating - winnerRating) / 400));
+  const expectedLoser = 1 - expectedWinner;
+
+  const newWinnerRating = Math.round(winnerRating + K * (1 - expectedWinner));
+  const newLoserRating = Math.round(Math.max(0, loserRating + K * (0 - expectedLoser)));
+
+  return { newWinnerRating, newLoserRating };
+}
+
+// 매칭 대기열(일반전/경쟁전)에서 해당 소켓을 제거한다. cancelSearch, disconnect 양쪽에서 재사용.
+function removeFromWaitingQueues(socket) {
+  Object.keys(waitingNormalPlayers).forEach((k) => {
+    if (waitingNormalPlayers[k] === socket) delete waitingNormalPlayers[k];
+  });
+  const rIdx = waitingRankedPlayers.findIndex((p) => p.socket === socket);
+  if (rIdx > -1) waitingRankedPlayers.splice(rIdx, 1);
+}
+
+// 닉네임 검증: 앞뒤 공백 제거, 꺾쇠괄호 제거(간단한 XSS 방지), 길이 제한.
+// 조건을 만족하지 못하면 null을 반환해 호출부에서 기존 값을 유지하도록 한다.
+function sanitizeNickname(raw) {
+  if (typeof raw !== 'string') return null;
+  const trimmed = raw.trim().replace(/[<>]/g, '');
+  if (trimmed.length < NICKNAME_MIN_LEN || trimmed.length > NICKNAME_MAX_LEN) return null;
+  return trimmed;
+}
+
+// 아바타는 화이트리스트에 있는 값만 허용한다.
+function sanitizeAvatar(raw) {
+  return ALLOWED_AVATARS.includes(raw) ? raw : null;
+}
+
+function createEmptyPlayerState() {
+  return { percent: 0, accuracy: 100, charIndex: 0, finished: false, netCorrect: 0, totalTyped: 0, totalErrors: 0 };
+}
+
+// 클라이언트가 보내는 progress/finished 데이터는 항상 이 함수를 통해 정제한다.
+// 정확도 하한선(예: 90% 이상만 인정) 같은 게이트는 절대 여기에 추가하지 않는다.
+function sanitizeStat(data, sampleTextLength) {
+  const accuracy = Number.isFinite(data.accuracy) ? Math.max(0, Math.min(100, data.accuracy)) : 100;
+  const charIndex = Number.isFinite(data.charIndex)
+    ? Math.max(0, Math.min(sampleTextLength, Math.floor(data.charIndex)))
+    : 0;
+  const netCorrect = Number.isFinite(data.netCorrect) ? Math.max(0, Math.floor(data.netCorrect)) : 0;
+  const totalTyped = Number.isFinite(data.totalTyped) ? Math.max(0, Math.floor(data.totalTyped)) : 0;
+  const totalErrors = Number.isFinite(data.totalErrors) ? Math.max(0, Math.floor(data.totalErrors)) : 0;
+  return { accuracy, charIndex, netCorrect, totalTyped, totalErrors };
+}
+
+function startMatch(playerA, playerB, mode, duration, isRanked) {
+  const roomId = `room_${playerA.id}_${playerB.id}_${Date.now()}`;
+  const prevTextA = playerA.data.lastText || '';
+  const text = generateUniqueText(mode, duration, prevTextA);
+
+  playerA.data.lastText = text;
+  playerB.data.lastText = text;
+
+  const startTime = Date.now() + COUNTDOWN_MS;
+
+  playerA.join(roomId);
+  playerB.join(roomId);
+  playerA.data.roomId = roomId;
+  playerB.data.roomId = roomId;
+
+  rooms[roomId] = {
+    mode, text, startTime, duration, isRanked,
+    endTimeoutId: null, ended: false, players: {}
+  };
+  rooms[roomId].players[playerA.id] = createEmptyPlayerState();
+  rooms[roomId].players[playerB.id] = createEmptyPlayerState();
+
+  const ratingA = userRatings[playerA.id];
+  const ratingB = userRatings[playerB.id];
+  const nameA = userNames[playerA.id];
+  const nameB = userNames[playerB.id];
+  const avatarA = userAvatars[playerA.id] || DEFAULT_AVATAR;
+  const avatarB = userAvatars[playerB.id] || DEFAULT_AVATAR;
+  const tierA = getTierInfo(ratingA);
+  const tierB = getTierInfo(ratingB);
+
+  const basePayload = {
+    mode, text, startTime,
+    duration: mode === 'time' ? duration : null,
+    isRanked
+  };
+
+  // 각 플레이어에게 "나"와 "상대" 관점으로 개인화된 데이터를 보낸다.
+  // (레이팅/티어/닉네임/아바타는 방송이 아니라 소켓별로 따로 보내야 me/opponent 구분이 명확함)
+  playerA.emit('gameStart', {
+    ...basePayload,
+    myName: nameA, myRating: ratingA, myTier: tierA, myAvatar: avatarA,
+    opponentName: nameB, opponentRating: ratingB, opponentTier: tierB, opponentAvatar: avatarB
+  });
+  playerB.emit('gameStart', {
+    ...basePayload,
+    myName: nameB, myRating: ratingB, myTier: tierB, myAvatar: avatarB,
+    opponentName: nameA, opponentRating: ratingA, opponentTier: tierA, opponentAvatar: avatarA
+  });
+
+  const timeoutMs = mode === 'time' ? (COUNTDOWN_MS + duration * 1000) : (COUNTDOWN_MS + WORDS_MODE_TIMEOUT_MS);
+  rooms[roomId].endTimeoutId = setTimeout(() => endGame(roomId, undefined), timeoutMs);
+}
+
+function endGame(roomId, forcedWinnerId) {
+  const room = rooms[roomId];
+  if (!room || room.ended) return;
+  room.ended = true;
+  clearTimeout(room.endTimeoutId);
+
+  const ids = Object.keys(room.players);
+  let winnerId = forcedWinnerId;
+
+  if (winnerId === undefined) {
+    const [id1, id2] = ids;
+    const p1 = room.players[id1];
+    const p2 = room.players[id2];
+
+    const nc1 = Number.isFinite(p1.netCorrect) ? p1.netCorrect : 0;
+    const nc2 = Number.isFinite(p2.netCorrect) ? p2.netCorrect : 0;
+
+    if (nc1 !== nc2) {
+      winnerId = nc1 > nc2 ? id1 : id2;
+    } else if (p1.percent !== p2.percent) {
+      winnerId = p1.percent > p2.percent ? id1 : id2;
+    } else {
+      winnerId = null;
+    }
+  }
+
+  let ratingChanges = {};
+  if (room.isRanked && winnerId !== null) {
+    const loserId = ids.find(id => id !== winnerId);
+    const wRating = userRatings[winnerId] || 1000;
+    const lRating = userRatings[loserId] || 1000;
+
+    const { newWinnerRating, newLoserRating } = calculateNewRatings(wRating, lRating);
+    userRatings[winnerId] = newWinnerRating;
+    userRatings[loserId] = newLoserRating;
+
+    ratingChanges[winnerId] = { old: wRating, new: newWinnerRating, diff: newWinnerRating - wRating };
+    ratingChanges[loserId] = { old: lRating, new: newLoserRating, diff: newLoserRating - lRating };
+  }
+
+  ids.forEach((id) => {
+    const opponentId = ids.find((x) => x !== id);
+    io.to(id).emit('gameOver', {
+      result: winnerId === null ? 'draw' : (winnerId === id ? 'win' : 'lose'),
+      myStats: room.players[id],
+      opponentStats: room.players[opponentId],
+      ratingData: room.isRanked ? ratingChanges[id] : null
+    });
+  });
+
+  delete rooms[roomId];
+}
+
+io.on('connection', (socket) => {
+  userRatings[socket.id] = userRatings[socket.id] || 1000;
+  userNames[socket.id] = userNames[socket.id] || `Guest${Math.floor(1000 + Math.random() * 9000)}`;
+  userAvatars[socket.id] = userAvatars[socket.id] || DEFAULT_AVATAR;
+  socket.emit('initUser', {
+    rating: userRatings[socket.id],
+    name: userNames[socket.id],
+    avatar: userAvatars[socket.id],
+    allowedAvatars: ALLOWED_AVATARS
+  });
+
+  // 프로필(닉네임/아바타) 변경 요청. 매칭 대기 중이든 평상시든 언제나 허용하되,
+  // 검증 실패한 필드는 무시하고 기존 값을 유지한다.
+  socket.on('setProfile', (data) => {
+    data = data || {};
+    const newName = sanitizeNickname(data.name);
+    const newAvatar = sanitizeAvatar(data.avatar);
+
+    if (newName) userNames[socket.id] = newName;
+    if (newAvatar) userAvatars[socket.id] = newAvatar;
+
+    socket.emit('profileUpdated', {
+      name: userNames[socket.id],
+      avatar: userAvatars[socket.id],
+      nameAccepted: !!newName,
+      avatarAccepted: !!newAvatar
+    });
+  });
+
+  socket.on('selectMode', (data) => {
+    data = data || {};
+    const isRanked = !!data.isRanked;
+    const mode = data.mode === 'time' ? 'time' : 'words';
+    let duration = mode === 'time' ? (ALLOWED_TIME_DURATIONS.includes(data.duration) ? data.duration : DEFAULT_TIME_DURATION) : null;
+
+    if (isRanked) {
+      const myRating = userRatings[socket.id];
+      const candidates = waitingRankedPlayers.filter(
+        p => p.socket.id !== socket.id && p.mode === mode && p.duration === duration && p.socket.connected
+      );
+
+      if (candidates.length > 0) {
+        candidates.sort((a, b) => Math.abs(a.rating - myRating) - Math.abs(b.rating - myRating));
+        const bestMatch = candidates[0];
+        const idx = waitingRankedPlayers.indexOf(bestMatch);
+        if (idx > -1) waitingRankedPlayers.splice(idx, 1);
+
+        startMatch(bestMatch.socket, socket, mode, duration, true);
+      } else {
+        waitingRankedPlayers.push({ socket, rating: myRating, mode, duration });
+        socket.emit('waiting', { isRanked: true });
+      }
+    } else {
+      const matchKey = mode === 'time' ? `time_${duration}` : 'words';
+      const opponent = waitingNormalPlayers[matchKey];
+
+      if (opponent && opponent.connected && opponent.id !== socket.id) {
+        delete waitingNormalPlayers[matchKey];
+        startMatch(opponent, socket, mode, duration, false);
+      } else {
+        waitingNormalPlayers[matchKey] = socket;
+        socket.emit('waiting', { isRanked: false });
+      }
+    }
+  });
+
+  socket.on('progress', (data) => {
+    const room = rooms[socket.data.roomId];
+    if (!room || room.ended) return;
+    const player = room.players[socket.id];
+    if (!player || player.finished) return;
+
+    const { accuracy, charIndex, netCorrect, totalTyped, totalErrors } = sanitizeStat(data || {}, room.text.length);
+
+    // percent는 charIndex 기반으로 서버에서 재계산해 클라이언트 위조/오차를 방지한다.
+    const percent = room.text.length > 0
+      ? Math.min(100, Math.floor((charIndex / room.text.length) * 100))
+      : 0;
+
+    player.percent = percent;
+    player.charIndex = charIndex;
+    player.netCorrect = netCorrect;
+    player.totalTyped = totalTyped;
+    player.totalErrors = totalErrors;
+    player.accuracy = totalTyped > 0
+      ? Math.max(0, Math.round(((totalTyped - totalErrors) / totalTyped) * 100))
+      : 100;
+
+    socket.to(socket.data.roomId).emit('opponentProgress', {
+      percent: player.percent, accuracy: player.accuracy, charIndex: player.charIndex,
+      netCorrect: player.netCorrect, totalTyped: player.totalTyped, totalErrors: player.totalErrors
+    });
+  });
+
+  // 완주 처리: 클라이언트가 finish 이벤트를 보내면 즉시 게임을 종료한다.
+  socket.on('playerFinished', (data) => {
+    const room = rooms[socket.data.roomId];
+    if (!room || room.ended) return;
+    const player = room.players[socket.id];
+    if (!player || player.finished) return;
+
+    const { accuracy, charIndex, netCorrect, totalTyped, totalErrors } = sanitizeStat(data || {}, room.text.length);
+
+    player.finished = true;
+    player.percent = 100;
+    player.charIndex = room.text.length;
+    player.netCorrect = netCorrect;
+    player.totalTyped = totalTyped;
+    player.totalErrors = totalErrors;
+    player.accuracy = totalTyped > 0
+      ? Math.max(0, Math.round(((totalTyped - totalErrors) / totalTyped) * 100))
+      : 100;
+
+    endGame(socket.data.roomId, socket.id);
+  });
+
+  // 매칭 대기 중 사용자가 취소를 누르면 대기열에서만 제거한다.
+  // 이미 매칭이 성사되어 방이 생성된 이후라면(gameStart 발송됨) 취소는 무시된다 —
+  // 이 경우 클라이언트는 곧 도착하는 gameStart 이벤트로 자연스럽게 게임 화면으로 전환된다.
+  socket.on('cancelSearch', () => {
+    removeFromWaitingQueues(socket);
+  });
+
+  socket.on('disconnect', () => {
+    removeFromWaitingQueues(socket);
+
+    const room = rooms[socket.data.roomId];
+    if (room && !room.ended) {
+      room.ended = true;
+      clearTimeout(room.endTimeoutId);
+      socket.to(socket.data.roomId).emit('opponentLeft');
+      delete rooms[socket.data.roomId];
+    }
+  });
+});
+
+server.listen(PORT, () => console.log(`서버 실행 중: http://localhost:${PORT}`));

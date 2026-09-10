@@ -1,0 +1,14 @@
+{
+  "name": "typing-multiplayer",
+  "version": "1.0.0",
+  "description": "1v1 실시간 멀티플레이 스피드 타이핑 게임 서버",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "socket.io": "^4.7.5",
+    "socket.io-client": "^4.8.3"
+  }
+}
