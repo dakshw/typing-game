@@ -107,12 +107,9 @@ const accountRatings = {}; // { playerId: rating } — 재접속 시 레이팅 �
 const ALLOWED_AVATARS = ['😀', '😎', '🤖', '🐱', '🐶', '🦊', '🐼', '🐵', '🔥', '⚡', '🎯', '🚀'];
 const DEFAULT_AVATAR = ALLOWED_AVATARS[0];
 
-// --- 접속 순번 기반 Player # 닉네임 시스템 ---
-let nextPlayerNumber = 1;
-
-// Player #번호 형태의 기본 닉네임 생성 (접속 순번 기반)
+// Player # + 6자리 랜덤 숫자 형태의 닉네임 생성
 function generatePlayerNick() {
-  const number = nextPlayerNumber++;
+  const number = Math.floor(100000 + Math.random() * 900000);
   return `Player #${number}`;
 }
 
