@@ -144,7 +144,6 @@ function appendDynamicTag(baseNick, rankTag) {
 function buildTopRankList() {
   const list = [];
   for (const [id, rating] of Object.entries(userRatings)) {
-    if (id.startsWith('bot_')) continue; // AI 봇은 랭킹에서 제외
     list.push({ id, rating });
   }
   list.sort((a, b) => b.rating - a.rating);
@@ -284,7 +283,8 @@ function calculateNewRatings(winnerRating, loserRating) {
 
 // 매칭 대기열(일반전/경쟁전)에서 해당 소켓을 제거한다. cancelSearch, disconnect 양쪽에서 재사용.
 function removeFromWaitingQueues(socket) {
-  clearBotFallbackTimer(socket.id);
+  clearPracticeFallbackTimer(socket.id);
+  delete soloPracticeSessions[socket.id];
   Object.keys(waitingNormalPlayers).forEach((k) => {
     if (waitingNormalPlayers[k] === socket) delete waitingNormalPlayers[k];
   });
@@ -292,127 +292,45 @@ function removeFromWaitingQueues(socket) {
   if (rIdx > -1) waitingRankedPlayers.splice(rIdx, 1);
 }
 
-// --- AI 봇(연습) 대전 시스템 ---
-// 매칭 대기 5초 초과 시 실제 유저 대신 AI 봇과 대전을 시작한다.
-const BOT_MATCHMAKING_DELAY_MS = 5000;
-const BOT_NAME = 'AI Bot';
-const BOT_AVATAR = '🤖';
-const BOT_RATING = 1000;
+// --- 솔로 연습 모드 (Solo Practice Mode) ---
+// 매칭 대기 5초 초과 시 시간 제한 없는 솔로 연습 모드로 자동 전환한다.
+// 유저는 대기열에 그대로 남아 있어, 연습 중에 실제 유저 매칭이 성사되면 즉시 대전으로 전환된다.
+const PRACTICE_FALLBACK_DELAY_MS = 5000;
+const PRACTICE_TEXT_DURATION = 60; // 연습 텍스트 청크 길이 기준 (분당 단어 수 환산용)
 
-const botMatchTimers = {}; // { socketId: timeoutId }
+const practiceTimers = {};       // { socketId: timeoutId }
+const soloPracticeSessions = {}; // { socketId: { text } }
 
-function clearBotFallbackTimer(socketId) {
-  if (botMatchTimers[socketId]) {
-    clearTimeout(botMatchTimers[socketId]);
-    delete botMatchTimers[socketId];
+function clearPracticeFallbackTimer(socketId) {
+  if (practiceTimers[socketId]) {
+    clearTimeout(practiceTimers[socketId]);
+    delete practiceTimers[socketId];
   }
 }
 
-// 대기열 등록 후 5초 내 실제 유저 매칭에 실패하면 AI 봇 대전으로 자동 전환한다.
-function scheduleBotFallback(socket, mode, duration, isRanked) {
-  clearBotFallbackTimer(socket.id);
-  botMatchTimers[socket.id] = setTimeout(() => {
-    delete botMatchTimers[socket.id];
+// 대기열 등록 후 5초 내 실제 유저 매칭에 실패하면 솔로 연습 텍스트를 내려준다.
+// 대기열에서는 제거하지 않는다 — 백그라운드 매칭은 계속 진행된다.
+function schedulePracticeFallback(socket) {
+  clearPracticeFallbackTimer(socket.id);
+  practiceTimers[socket.id] = setTimeout(() => {
+    delete practiceTimers[socket.id];
     if (!socket.connected) return;
-    // 이미 실제 유저와 매칭이 성사됐다면 아무것도 하지 않는다.
+    // 이미 매칭이 성사됐거나 연습 세션이 있으면 아무것도 하지 않는다.
     const stillWaiting =
       Object.values(waitingNormalPlayers).includes(socket) ||
       waitingRankedPlayers.some((p) => p.socket === socket);
-    if (!stillWaiting) return;
-    removeFromWaitingQueues(socket);
-    socket.emit('botMatchStarting', { duration });
-    startBotMatch(socket, mode, duration, isRanked);
-  }, BOT_MATCHMAKING_DELAY_MS);
+    if (!stillWaiting || soloPracticeSessions[socket.id]) return;
+    const text = generateUniqueText('practice', PRACTICE_TEXT_DURATION, socket.data.lastText || '');
+    socket.data.lastText = text;
+    soloPracticeSessions[socket.id] = { text };
+    socket.emit('soloPracticeStart', { text });
+  }, PRACTICE_FALLBACK_DELAY_MS);
 }
 
-// AI 봇 대전: 사람 소켓 1명 + 가상 봇 플레이어로 구성된 방을 만든다.
-// 봇 매치는 연습전이므로 MMR/트로피/해임 승수에 반영되지 않는다.
-function startBotMatch(socket, mode, duration, isRanked) {
-  const roomId = `bot_${socket.id}_${Date.now()}`;
-  const botId = `${roomId}__bot`;
-  const prevText = socket.data.lastText || '';
-  const text = generateUniqueText(mode, duration, prevText);
-  socket.data.lastText = text;
-
-  const startTime = Date.now() + COUNTDOWN_MS;
-  socket.join(roomId);
-  socket.data.roomId = roomId;
-
-  const botWpm = 200 + Math.floor(Math.random() * 101); // 200~300 WPM
-
-  userNames[botId] = BOT_NAME;
-  userAvatars[botId] = BOT_AVATAR;
-  userRatings[botId] = BOT_RATING;
-
-  rooms[roomId] = {
-    mode, text, startTime, duration, isRanked, isBot: true,
-    endTimeoutId: null, ended: false, players: {}
-  };
-  rooms[roomId].players[socket.id] = createEmptyPlayerState();
-  rooms[roomId].players[botId] = createEmptyPlayerState();
-
-  const rating = userRatings[socket.id] || 1000;
-  socket.emit('gameStart', {
-    mode, text, startTime,
-    duration: mode === 'time' ? duration : null,
-    isRanked,
-    isBotMatch: true,
-    myName: userNames[socket.id], myRating: rating,
-    myTier: getTierInfo(rating), myAvatar: userAvatars[socket.id] || DEFAULT_AVATAR,
-    myTrophies: userTrophies[socket.id] || 0,
-    opponentName: BOT_NAME, opponentRating: BOT_RATING, opponentTier: getTierInfo(BOT_RATING),
-    opponentAvatar: BOT_AVATAR, opponentTrophies: 0
-  });
-
-  rooms[roomId].endTimeoutId = setTimeout(() => endGame(roomId, undefined), COUNTDOWN_MS + duration * 1000);
-
-  // 봇 타이핑 시뮬레이션: 카운트다운 종료 후 WPM에 해당하는 일정 속도로 진행
-  const charsPerSec = (botWpm * 5) / 60; // 표준 5타 = 1단어 환산
-  let carry = 0;
-  const botIntervalId = setInterval(() => {
-    const room = rooms[roomId];
-    if (!room || room.ended) { clearInterval(botIntervalId); return; }
-    if (Date.now() < startTime) return; // 카운트다운 중에는 타이핑하지 않음
-    carry += charsPerSec / 10; // 100ms 간격
-    if (carry < 1) return;
-    const advance = Math.floor(carry);
-    carry -= advance;
-
-    const bot = room.players[botId];
-    if (!bot || bot.finished) return;
-    bot.charIndex = Math.min(room.text.length, bot.charIndex + advance);
-    bot.totalTyped = bot.charIndex;
-    bot.totalErrors = 0;
-    bot.netCorrect = bot.charIndex;
-    bot.accuracy = 100;
-    bot.percent = room.text.length > 0
-      ? Math.min(100, Math.floor((bot.charIndex / room.text.length) * 100))
-      : 0;
-
-    // 사람 플레이어에게 봇의 실시간 진행 상황 전송 (파란 커서 이동)
-    socket.emit('opponentProgress', {
-      percent: bot.percent, accuracy: bot.accuracy, charIndex: bot.charIndex,
-      netCorrect: bot.netCorrect, totalTyped: bot.totalTyped, totalErrors: bot.totalErrors
-    });
-
-    if (bot.percent >= 100) {
-      bot.finished = true;
-      bot.finishTime = Date.now();
-      endGame(roomId, botId);
-    }
-  }, 100);
-  rooms[roomId].botIntervalId = botIntervalId;
-}
-
-// 봇 이름/레이팅 등 임시 메모리 정리
-function cleanupBotEntries(room) {
-  if (!room || !room.isBot) return;
-  const botId = Object.keys(room.players).find((x) => x.startsWith('bot_'));
-  if (botId) {
-    delete userNames[botId];
-    delete userAvatars[botId];
-    delete userRatings[botId];
-  }
+// 실제 유저와 매칭 성사 시 연습 타이머/세션을 정리한다.
+function clearPracticeSession(socketId) {
+  clearPracticeFallbackTimer(socketId);
+  delete soloPracticeSessions[socketId];
 }
 
 // 닉네임/아바타 사용자 입력 검증 함수는 더 이상 사용하지 않는다.
@@ -557,7 +475,6 @@ function endGame(roomId, forcedWinnerId) {
   if (!room || room.ended) return;
   room.ended = true;
   clearTimeout(room.endTimeoutId);
-  if (room.botIntervalId) clearInterval(room.botIntervalId);
 
   const ids = Object.keys(room.players);
   let winnerId = forcedWinnerId;
@@ -596,7 +513,7 @@ function endGame(roomId, forcedWinnerId) {
   }
 
   let ratingChanges = {};
-  if (room.isRanked && !room.isBot && winnerId !== null) {
+  if (room.isRanked && winnerId !== null) {
     const loserId = ids.find(id => id !== winnerId);
     const wRating = userRatings[winnerId] || 1000;
     const lRating = userRatings[loserId] || 1000;
@@ -610,24 +527,21 @@ function endGame(roomId, forcedWinnerId) {
   }
 
   let winnerUnlock = null;
-  if (!room.isRanked && !room.isBot && winnerId !== null) {
+  if (!room.isRanked && winnerId !== null) {
     const winnerSocket = io.sockets.sockets.get(winnerId);
     if (winnerSocket) winnerUnlock = addNormalWin(winnerSocket);
   }
 
   // --- 트로피 변동 계산 (시간 모드 배율 적용) ---
-  // 봇 연습전에는 트로피를 반영하지 않는다.
   const trophyChanges = {};
-  if (!room.isBot) {
-    ids.forEach((id) => {
-      const res = winnerId === null ? 'draw' : (winnerId === id ? 'win' : 'lose');
-      const change = getTrophyChange(res, room.duration);
-      userTrophies[id] = Math.max(0, (userTrophies[id] || 0) + change);
-      trophyChanges[id] = { new: userTrophies[id], diff: change };
-      const playerSocketForTrophy = io.sockets.sockets.get(id);
-      if (playerSocketForTrophy) persistTrophies(playerSocketForTrophy);
-    });
-  }
+  ids.forEach((id) => {
+    const res = winnerId === null ? 'draw' : (winnerId === id ? 'win' : 'lose');
+    const change = getTrophyChange(res, room.duration);
+    userTrophies[id] = Math.max(0, (userTrophies[id] || 0) + change);
+    trophyChanges[id] = { new: userTrophies[id], diff: change };
+    const playerSocketForTrophy = io.sockets.sockets.get(id);
+    if (playerSocketForTrophy) persistTrophies(playerSocketForTrophy);
+  });
 
   // 경쟁전 레이팅 영구 저장
   if (room.isRanked) {
@@ -640,9 +554,8 @@ function endGame(roomId, forcedWinnerId) {
   ids.forEach((id) => {
     const oppId = ids.find((x) => x !== id);
     const playerSocket = io.sockets.sockets.get(id);
-    if (!playerSocket) return; // AI 봇 등 비소켓 참가자는 게임오버 전송 생략
     const oppSocket = io.sockets.sockets.get(oppId);
-    const oppPlayerId = oppSocket && oppSocket.data ? oppSocket.data.playerId : (room.isBot ? 'BOT' : null);
+    const oppPlayerId = oppSocket && oppSocket.data ? oppSocket.data.playerId : null;
 
     io.to(id).emit('gameOver', {
       result: winnerId === null ? 'draw' : (winnerId === id ? 'win' : 'lose'),
@@ -653,12 +566,11 @@ function endGame(roomId, forcedWinnerId) {
       unlock: playerSocket ? unlockPayload(playerSocket) : null,
       justUnlocked: !!(winnerUnlock && winnerId === id && winnerUnlock.justUnlocked),
       opponentId: oppPlayerId,
-      opponentName: room.isBot ? BOT_NAME : (userNames[oppId] || 'Opponent'),
+      opponentName: userNames[oppId] || 'Opponent',
       roomId: roomId
     });
   });
 
-  cleanupBotEntries(room);
   delete rooms[roomId];
 }
 
@@ -745,11 +657,13 @@ io.on('connection', (socket) => {
         if (idx > -1) waitingRankedPlayers.splice(idx, 1);
 
         startMatch(bestMatch.socket, socket, mode, duration, true);
+        clearPracticeSession(socket.id);
+        clearPracticeSession(bestMatch.socket.id);
       } else {
         waitingRankedPlayers.push({ socket, rating: myRating, mode, duration });
         socket.emit('waiting', { isRanked: true });
-        // 5초 내 매칭 실패 시 AI 봇 대전으로 자동 전환
-        scheduleBotFallback(socket, mode, duration, isRanked);
+        // 5초 내 매칭 실패 시 시간 제한 없는 솔로 연습 모드로 자동 전환 (대기열 유지)
+        schedulePracticeFallback(socket);
       }
     } else {
       const matchKey = `time_${duration}`;
@@ -758,11 +672,13 @@ io.on('connection', (socket) => {
       if (opponent && opponent.connected && opponent.id !== socket.id) {
         delete waitingNormalPlayers[matchKey];
         startMatch(opponent, socket, mode, duration, false);
+        clearPracticeSession(socket.id);
+        clearPracticeSession(opponent.id);
       } else {
         waitingNormalPlayers[matchKey] = socket;
         socket.emit('waiting', { isRanked: false });
-        // 5초 내 매칭 실패 시 AI 봇 대전으로 자동 전환
-        scheduleBotFallback(socket, mode, duration, isRanked);
+        // 5초 내 매칭 실패 시 시간 제한 없는 솔로 연습 모드로 자동 전환 (대기열 유지)
+        schedulePracticeFallback(socket);
       }
     }
   });
@@ -982,12 +898,30 @@ io.on('connection', (socket) => {
     socket.emit('reportResult', { success: true, message: 'Report submitted. Thank you!' });
   });
 
+  // --- 솔로 연습 모드 ---
+  // 연습 중에도 대기열에 남아 있어 실제 유저 매칭 성사 시 gameStart가 즉시 발송되어
+  // 클라이언트가 자연스럽게 대전 화면으로 전환된다.
+  socket.on('requestPracticeText', () => {
+    const session = soloPracticeSessions[socket.id];
+    if (!session) return;
+    const text = generateUniqueText('practice', PRACTICE_TEXT_DURATION, session.text);
+    session.text = text;
+    socket.data.lastText = text;
+    socket.emit('practiceText', { text });
+  });
+
+  socket.on('exitPractice', () => {
+    clearPracticeSession(socket.id);
+  });
+
   socket.on('cancelSearch', () => {
     removeFromWaitingQueues(socket);
+    clearPracticeSession(socket.id);
   });
 
   socket.on('disconnect', () => {
     removeFromWaitingQueues(socket);
+    clearPracticeSession(socket.id);
 
     const room = rooms[socket.data.roomId];
     if (room && !room.ended) {
@@ -1009,7 +943,6 @@ io.on('connection', (socket) => {
         unlock: remainingUnlock,
         justUnlocked
       });
-      cleanupBotEntries(room);
       delete rooms[socket.data.roomId];
     }
   });

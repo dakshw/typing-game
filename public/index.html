@@ -327,6 +327,10 @@
 
       <div class="result-banner" id="resultBanner"></div>
 
+      <div id="practiceExitRow" style="display:none; margin-top:18px;">
+        <button class="btn-restart btn-secondary" onclick="exitPractice()">⬅ Exit Practice / Back to Menu</button>
+      </div>
+
       <div class="restart-row" id="restartRow">
         <button class="btn-restart" onclick="rematchSameMode()">🔁 Rematch</button>
         <button class="btn-restart btn-secondary" onclick="location.reload()">Change Mode</button>
@@ -389,7 +393,8 @@
     let lastMatchStats = null;
     let selectedReportReason = null;
     let reportedMatchIds = new Set();
-    let isBotMatch = false;
+    let isSoloPractice = false;
+    let practiceChunksTyped = 0;
 
     // --- Report ---
     function openReportModal() {
@@ -641,11 +646,13 @@
       totalTyped = 0;
       totalErrors = 0;
       prevVal = "";
+      document.getElementById('timer').parentElement.style.display = '';
       document.getElementById('typingInput').value = '';
       document.getElementById('typingInput').disabled = true;
       document.getElementById('quoteDisplay').innerHTML = '';
       document.getElementById('quoteDisplay').style.transform = 'translateY(0px)';
       document.getElementById('matchupBar').classList.add('hidden-state');
+      document.getElementById('practiceExitRow').style.display = 'none';
       if (oppCaretEl) oppCaretEl.style.display = 'none';
     }
 
@@ -664,8 +671,8 @@
       setLobbyVisible(false);
       document.getElementById('title').innerText = "Finding opponent...";
       document.getElementById('statusMessage').innerText = isRanked
-        ? "Searching for a similar rank... (AI Bot joins in 5s if no match)"
-        : "Looking for an opponent... (AI Bot joins in 5s if no match)";
+        ? "Searching for a similar rank... (Solo Practice starts in 5s)"
+        : "Looking for an opponent... (Solo Practice starts in 5s)";
       document.getElementById('waitingControls').style.display = 'block';
     }
 
@@ -819,6 +826,18 @@
 
       const accuracy = totalTyped > 0 ? Math.max(0, Math.round(((totalTyped - totalErrors) / totalTyped) * 100)) : 100;
       document.getElementById('accuracy').innerText = accuracy;
+
+      // 솔로 연습 모드: 시간 제한 없음, progress 전송 불필요.
+      // 현재 청크를 모두 채우면 즉시 다음 텍스트를 요청해 무한히 이어간다 (Endless).
+      if (isSoloPractice) {
+        if (val.length >= sampleText.length) {
+          e.target.value = '';
+          prevVal = "";
+          requestMorePracticeText();
+        }
+        return;
+      }
+
       const percent = (val.length === sampleText.length) ? 100 : Math.floor((val.length / sampleText.length) * 100);
 
       socket.emit('progress', { percent, accuracy, charIndex: val.length, netCorrect, totalTyped, totalErrors });
@@ -879,7 +898,11 @@
     }
 
     socket.on('gameStart', (data) => {
+      const wasPracticing = isSoloPractice;
       resetGameState();
+      isSoloPractice = false;
+      practiceChunksTyped = 0;
+      document.getElementById('timer').parentElement.style.display = '';
       currentMode = data.mode;
       sampleText = data.text;
       duration = data.duration;
@@ -888,9 +911,8 @@
       document.getElementById('waitingControls').style.display = 'none';
       document.getElementById('gameArea').style.display = 'block';
       setLobbyVisible(false);
-      document.getElementById('modeBadge').innerText = `${data.isBotMatch ? '[Practice vs AI Bot] ' : data.isRanked ? '[Ranked] ' : '[Casual] '}${duration}s`;
-      document.getElementById('statusMessage').innerText = data.isBotMatch ? "No opponent found — practicing vs AI Bot!" : "Opponent found!";
-      isBotMatch = !!data.isBotMatch;
+      document.getElementById('modeBadge').innerText = `${data.isRanked ? '[Ranked] ' : '[Casual] '}${duration}s`;
+      document.getElementById('statusMessage').innerText = wasPracticing ? "Opponent found! Practice ended — match starting!" : "Opponent found!";
       document.getElementById('resultBanner').innerHTML = '';
       document.getElementById('restartRow').style.display = 'none';
       if (data.myTier && data.opponentTier) renderMatchupBar(data);
@@ -1011,8 +1033,67 @@
       setLobbyVisible(true);
     });
 
-    socket.on('botMatchStarting', () => {
-      document.getElementById('statusMessage').innerText = '🤖 No opponent found — starting AI Bot match...';
+    socket.on('soloPracticeStart', (data) => {
+      isSoloPractice = true;
+      practiceChunksTyped = 0;
+      sampleText = data.text;
+      duration = 0; // 0 = 시간 제한 없음 (Endless)
+      gameEnded = false;
+      serverStartTime = Date.now();
+      totalTyped = 0;
+      totalErrors = 0;
+      prevVal = "";
+
+      document.getElementById('modeSelect').style.display = 'none';
+      document.getElementById('waitingControls').style.display = 'none';
+      document.getElementById('gameArea').style.display = 'block';
+      setLobbyVisible(false);
+      document.getElementById('modeBadge').innerText = '[Solo Practice — No Time Limit]';
+      document.getElementById('statusMessage').innerText = '';
+      document.getElementById('title').innerText = 'Solo Practice — type as long as you want';
+      document.getElementById('resultBanner').innerHTML = '';
+      document.getElementById('resultBanner').className = 'result-banner';
+      document.getElementById('restartRow').style.display = 'none';
+      document.getElementById('matchupBar').classList.add('hidden-state');
+      renderQuote();
+      if (oppCaretEl) oppCaretEl.style.display = 'none'; // 연습 모드에서는 상대 커서 없음
+      document.getElementById('typingInput').disabled = false;
+      document.getElementById('typingInput').focus();
+      document.getElementById('timer').parentElement.style.display = 'none';
+      document.getElementById('practiceExitRow').style.display = 'block';
+    });
+
+    // 연습 텍스트 청크 소진 시 서버에 다음 청크 요청 (Endless)
+    function requestMorePracticeText() {
+      socket.emit('requestPracticeText');
+    }
+
+    // Exit Practice — 연습 종료 후 대기실로 복귀 (백그라운드 매칭은 서버에서 계속됨)
+    function exitPractice() {
+      gameEnded = true;
+      isSoloPractice = false;
+      document.getElementById('typingInput').disabled = true;
+      document.getElementById('gameArea').style.display = 'none';
+      document.getElementById('practiceExitRow').style.display = 'none';
+      resetGameState();
+      document.getElementById('resultBanner').innerHTML = '';
+      document.getElementById('resultBanner').className = 'result-banner';
+      document.getElementById('restartRow').style.display = 'none';
+      backToMainModes();
+      document.getElementById('modeSelect').style.display = 'flex';
+      document.getElementById('typeTab').style.display = 'flex';
+      setLobbyVisible(true);
+      document.getElementById('title').innerText = 'Select Match Duration';
+      document.getElementById('statusMessage').innerText = 'Still searching for an opponent in background...';
+    }
+
+    socket.on('practiceText', (data) => {
+      if (!isSoloPractice) return;
+      practiceChunksTyped += sampleText.length;
+      sampleText = data.text;
+      renderQuote();
+      document.getElementById('typingInput').disabled = false;
+      document.getElementById('typingInput').focus();
     });
 
     socket.on('opponentLeft', (data) => {
