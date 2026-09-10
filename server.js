@@ -103,14 +103,23 @@ const waitingNormalPlayers = {};
 const userTrophies = {};
 const accountTrophies = {};
 const accountRatings = {}; // { playerId: rating } — 재접속 시 레이팅 복구용
+const accountNames = {}; // { playerId: 'Player #XXXXXX' } — 재접속 시 닉네임 복구용
 // 프로필에서 선택 가능한 아바타 이모지 화이트리스트.
 const ALLOWED_AVATARS = ['😀', '😎', '🤖', '🐱', '🐶', '🦊', '🐼', '🐵', '🔥', '⚡', '🎯', '🚀'];
 const DEFAULT_AVATAR = ALLOWED_AVATARS[0];
 
 // Player # + 6자리 랜덤 숫자 형태의 닉네임 생성
-function generatePlayerNick() {
-  const number = Math.floor(100000 + Math.random() * 900000);
-  return `Player #${number}`;
+function generatePlayerCode() {
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+  let result = '';
+  for (let i = 0; i < 6; i++) {
+    result += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  return result;
+}
+
+function generatePlayerNick(playerId) {
+  return `Player #${playerId}`;
 }
 
 // 랭킹 순위 기반 닉네임 태그 생성 (100위 이내에만 [#순위] 태그 부여)
@@ -287,8 +296,9 @@ function removeFromWaitingQueues(socket) {
 function sanitizePlayerId(raw) {
   if (typeof raw !== 'string') return null;
   const id = raw.trim();
-  if (!/^[A-Za-z0-9_-]{8,64}$/.test(id)) return null;
-  return id;
+  // Player #XXXXXX 형태(6자리 영문+숫자) 허용
+  if (/^Player #[A-Z0-9]{6}$/.test(id)) return id;
+  return null;
 }
 
 function getNormalWins(socket) {
@@ -312,6 +322,9 @@ function persistNormalWins(socket) {
   if (socket.data && socket.data.playerId) {
     accountNormalWins[socket.data.playerId] = getNormalWins(socket);
     accountRatings[socket.data.playerId] = userRatings[socket.id] || 1000;
+    // 태그 없는 기본 이름만 저장 (태그는 매 연결 시 재생성)
+    const baseName = (userNames[socket.id] || '').replace(/\[[^\]]*\]\s*/g, '').trim();
+    if (baseName) accountNames[socket.data.playerId] = baseName;
   }
 }
 
@@ -518,20 +531,10 @@ function endGame(roomId, forcedWinnerId) {
   delete rooms[roomId];
 }
 
-io.on('connection', (socket) => {
-  runSeasonResets();
-
-  userRatings[socket.id] = userRatings[socket.id] || 1000;
-  // 닉네임 입력 UI를 완전히 제거했으므로, 서버 접속 순번 기반으로만 Player #번호 닉네임을 부여한다.
-  userNames[socket.id] = userNames[socket.id] || generatePlayerNick();
-  userAvatars[socket.id] = userAvatars[socket.id] || DEFAULT_AVATAR;
-  userNormalWins[socket.id] = userNormalWins[socket.id] || 0;
-  userTrophies[socket.id] = userTrophies[socket.id] || 0;
-
-  // 현재 전역 통계 기준 랭킹/칭호 태그를 닉네임에 자동으로 결합한다.
+function sendInitUser(socket) {
   const rankTag = buildRankTagForSocket(socket.id);
-  userNames[socket.id] = appendDynamicTag(userNames[socket.id], rankTag);
-
+  const baseName = (userNames[socket.id] || '').replace(/\[[^\]]*\]\s*/g, '').trim();
+  userNames[socket.id] = appendDynamicTag(baseName, rankTag);
   socket.emit('initUser', {
     rating: userRatings[socket.id],
     trophies: userTrophies[socket.id],
@@ -539,12 +542,25 @@ io.on('connection', (socket) => {
     avatar: userAvatars[socket.id],
     allowedAvatars: ALLOWED_AVATARS,
     ...unlockPayload(socket),
-    rankTag: rankTag,
-    isPlayerNumberMode: true
+    rankTag: rankTag
   });
+}
 
-  // 새로고침해도 같은 브라우저면 일반전 승수를 이어가기 위한 계정 키.
-  // 승수 숫자는 클라이언트가 직접 올리지 못하고, playerId 로 서버 메모리에서만 복구한다.
+io.on('connection', (socket) => {
+  runSeasonResets();
+
+  userRatings[socket.id] = userRatings[socket.id] || 1000;
+  userAvatars[socket.id] = userAvatars[socket.id] || DEFAULT_AVATAR;
+  userNormalWins[socket.id] = userNormalWins[socket.id] || 0;
+  userTrophies[socket.id] = userTrophies[socket.id] || 0;
+
+  // 임시 이름 (identify 이후 실제 이름으로 교체됨)
+  userNames[socket.id] = userNames[socket.id] || 'Connecting...';
+
+  // 초기 initUser (identify 전 임시 상태)
+  sendInitUser(socket);
+
+  // 클라이언트가 playerId를 보내면 기존 계정 데이터 복구 + 닉네임 재전송
   socket.on('identify', (data) => {
     data = data || {};
     const playerId = sanitizePlayerId(data.playerId);
@@ -556,6 +572,19 @@ io.on('connection', (socket) => {
     userNormalWins[socket.id] = accountNormalWins[playerId] || 0;
     userRatings[socket.id] = accountRatings[playerId] || userRatings[socket.id];
     userTrophies[socket.id] = accountTrophies[playerId] || 0;
+
+    // 기존 닉네임이 있으면 복구, 없으면 새 Player #XXXXXX 생성
+    if (accountNames[playerId]) {
+      userNames[socket.id] = accountNames[playerId];
+    } else {
+      const newId = generatePlayerCode();
+      const nick = generatePlayerNick(newId);
+      accountNames[playerId] = nick;
+      userNames[socket.id] = nick;
+    }
+
+    // 랭킹 태그 재생성 후 클라이언트에 전달
+    sendInitUser(socket);
     socket.emit('unlockStatus', unlockPayload(socket));
     socket.emit('trophyUpdate', { trophies: userTrophies[socket.id] });
   });

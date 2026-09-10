@@ -468,36 +468,49 @@
       if (trophySpan) trophySpan.innerText = myTrophies;
     }
 
-    function getOrCreatePlayerId() {
+    function getOrCreatePlayerCode() {
       try {
-        let id = localStorage.getItem('typingPlayerId');
-        if (!id || !/^[A-Za-z0-9_-]{8,64}$/.test(id)) {
-          if (window.crypto && typeof window.crypto.randomUUID === 'function') {
-            id = window.crypto.randomUUID().replace(/-/g, '');
-          } else {
-            id = 'p' + Math.random().toString(36).slice(2) + Date.now().toString(36);
+        let id = localStorage.getItem('player_id');
+        // 6자리 영문+숫자 형태가 아니면 새로 생성
+        if (!id || !/^[A-Z0-9]{6}$/.test(id)) {
+          const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+          let result = '';
+          for (let i = 0; i < 6; i++) {
+            result += chars.charAt(Math.floor(Math.random() * chars.length));
           }
-          localStorage.setItem('typingPlayerId', id);
+          id = result;
+          localStorage.setItem('player_id', id);
         }
         return id;
       } catch (e) {
-        return 'p' + Math.random().toString(36).slice(2) + Date.now().toString(36);
+        const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+        let result = '';
+        for (let i = 0; i < 6; i++) result += chars.charAt(Math.floor(Math.random() * chars.length));
+        return result;
       }
     }
 
     // 서버 연결 시 identify만 보냄 (프로필 입력/전송 없음)
     socket.on('connect', () => {
-      socket.emit('identify', { playerId: getOrCreatePlayerId() });
+      const code = getOrCreatePlayerCode();
+      socket.emit('identify', { playerId: 'Player #' + code });
       fetchLeaderboard();
     });
 
-    // 서버가 부여한 Player #번호 + 랭킹/칭호 태그를 그대로 표시
+    // 서버가 부여한 Player #코드 + 랭킹/칭호 태그를 그대로 표시
     socket.on('initUser', (data) => {
       myRating = data.rating;
       myTrophies = data.trophies || 0;
       if (data.name) myName = data.name;
       if (data.avatar) myAvatar = data.avatar;
       applyUnlockStatus(data);
+      // 서버가 받은 닉네임에서 코드만 추출해 localStorage에 저장 (재접속 시 유지)
+      if (data.name) {
+        const code = data.name.replace(/^Player #/, '').replace(/\s*\[.*\]\s*$/, '').trim();
+        if (/^[A-Z0-9]{6}$/.test(code)) {
+          try { localStorage.setItem('player_id', code); } catch(e) {}
+        }
+      }
       updateTopBar();
       fetchLeaderboard();
     });
