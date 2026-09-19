@@ -1,6 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
+  <script src="/socket.io/socket.io.js"></script>
   <meta charset="UTF-8">
   <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
   <meta http-equiv="Pragma" content="no-cache">
@@ -34,6 +35,9 @@
     .btn-restart:hover { background: #45a049; }
     .btn-secondary { background: transparent; border: 1px solid #555; color: #aaa; padding: 8px 14px; font-size: 0.85rem; margin-left: 10px; }
     .btn-secondary:hover { background: #222; border-color: #777; }
+
+    .btn-leave-match { opacity: 0.3; font-size: 11px; padding: 4px 8px; transition: opacity 0.15s ease; }
+    .btn-leave-match:hover { opacity: 1.0; }
     .restart-row { display: none; margin-top: 20px; }
 
     .mode-select { display: flex; flex-direction: column; align-items: center; gap: 14px; margin-top: 10px; }
@@ -103,6 +107,38 @@
     .matchup-info .player-name { font-weight: bold; font-size: 0.95rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .matchup-info .tier-badge { display: inline-flex; align-items: center; gap: 4px; font-size: 0.72rem; font-weight: bold; padding: 2px 9px; border-radius: 10px; margin-top: 4px; border: 1px solid; white-space: nowrap; }
     .matchup-vs { flex-shrink: 0; font-weight: bold; color: #555; font-size: 0.85rem; padding: 0 6px; }
+
+    .rank-badge {
+      display: inline-block;
+      font-weight: 800;
+      font-size: 0.72rem;
+      padding: 2px 8px;
+      border-radius: 10px;
+      margin-top: 4px;
+      margin-left: 0;
+      letter-spacing: 0.5px;
+      white-space: nowrap;
+      animation: rankPulse 2.2s ease-in-out infinite;
+    }
+    .rank-badge.hidden-badge { display: none !important; }
+    .rank-badge.rank-tier-1 {
+      color: #3a2400;
+      background: linear-gradient(135deg, #ffe066, #ffb200);
+      text-shadow: 0 0 4px #fff6d0;
+      box-shadow: 0 0 8px rgba(255, 215, 0, 0.85), 0 0 18px rgba(255, 178, 0, 0.4);
+    }
+    .rank-badge.rank-tier-3 {
+      color: #1c2733;
+      background: linear-gradient(135deg, #eef3f8, #b9c6d4);
+      text-shadow: 0 0 4px #ffffff;
+      box-shadow: 0 0 7px rgba(200, 210, 220, 0.8), 0 0 14px rgba(160, 180, 200, 0.35);
+    }
+    .rank-badge.rank-tier-10 {
+      color: #2e1707;
+      background: linear-gradient(135deg, #e2a86a, #cd7f32);
+      text-shadow: 0 0 4px #ffdca8;
+      box-shadow: 0 0 7px rgba(205, 127, 50, 0.75), 0 0 14px rgba(168, 98, 30, 0.3);
+    }
 
     .user-info-row { display: flex; align-items: center; justify-content: center; gap: 10px; margin-bottom: 15px; }
     .my-avatar-badge { width: 30px; height: 30px; border-radius: 50%; background: #1c1c1c; border: 1px solid #444; display: flex; align-items: center; justify-content: center; font-size: 1rem; }
@@ -243,6 +279,10 @@
             <span class="mode-title">⏱ 120s</span>
             <span class="mode-desc">Long</span>
           </button>
+          <button class="btn-mode" id="btnPractice" onclick="startPracticeMode()">
+            <span class="mode-title">✏️ Practice</span>
+            <span class="mode-desc">No limit, no opponent</span>
+          </button>
         </div>
 
         <div class="private-section">
@@ -299,23 +339,25 @@
 
       <div class="matchup-bar hidden-state" id="matchupBar">
         <div class="matchup-player me">
-          <div class="matchup-avatar" id="myAvatar"></div>
+          <div class="matchup-avatar" id="myAvatar">😀</div>
           <div class="matchup-info">
-            <div class="player-name" id="myMatchupName"></div>
-            <div class="tier-badge" id="myTierBadge"></div>
+            <div class="player-name" id="myMatchupName">Player</div>
+            <span class="rank-badge hidden-badge" id="myRankBadge"></span>
+            <div class="tier-badge" id="myTierBadge">🏆 0</div>
           </div>
         </div>
         <div class="matchup-vs">VS</div>
         <div class="matchup-player opponent">
-          <div class="matchup-avatar" id="oppAvatar"></div>
+          <div class="matchup-avatar" id="oppAvatar">👤</div>
           <div class="matchup-info">
-            <div class="player-name" id="oppMatchupName"></div>
-            <div class="tier-badge" id="oppTierBadge"></div>
+            <div class="player-name" id="oppMatchupName">Opponent</div>
+            <span class="rank-badge hidden-badge" id="oppRankBadge"></span>
+            <div class="tier-badge" id="oppTierBadge">🏆 0</div>
           </div>
         </div>
       </div>
 
-      <div class="type-area">
+      <div class="type-area" id="typeArea">
         <div class="quote-viewport" id="quoteViewport">
           <div class="quote-display" id="quoteDisplay"></div>
         </div>
@@ -328,15 +370,25 @@
         <div id="timerLabel">Time: <span id="timer">30</span>s</div>
       </div>
 
+      <div id="leaveMatchRow" style="margin-top:10px;">
+        <button class="btn-secondary btn-leave-match" onclick="leaveCurrentMatch()">🚪 Leave Match (Forfeit)</button>
+      </div>
+
       <div class="result-banner" id="resultBanner"></div>
 
       <div id="practiceExitRow" style="display:none; margin-top:18px;">
-        <button class="btn-restart btn-secondary" onclick="exitPractice()">⬅ Exit Practice / Back to Menu</button>
+        <button class="btn-restart btn-secondary" onclick="exitPractice()">← Exit Practice / Back to Menu</button>
       </div>
 
       <div class="restart-row" id="restartRow">
-        <button class="btn-restart" onclick="rematchSameMode()">🔁 Rematch</button>
+        <button class="btn-restart" id="rematchBtn" onclick="requestRematch()">🔁 Rematch</button>
+        <button class="btn-restart" id="findNextBtn" onclick="findNextMatch()">⏭ Play Again</button>
         <button class="btn-restart btn-secondary" onclick="location.reload()">Change Mode</button>
+      </div>
+
+      <div id="rematchStatus" style="display:none; margin-top:14px; padding:12px; background:#1a1a1a; border:1px solid #333; border-radius:8px; font-size:0.9rem; color:#aaa; text-align:center;">
+        <div id="rematchStatusText">Waiting for opponent...</div>
+        <div style="margin-top:10px; display:flex; gap:8px; justify-content:center;" id="rematchActionRow"></div>
       </div>
     </div>
   </div>
@@ -361,11 +413,62 @@
     </div>
   </div>
 
-  <script src="/socket.io/socket.io.js"></script>
   <script>
-    const socket = io();
+    /* =========================================================
+       Speed Typing Test — Client Script
+       (Practice Mode: 클라이언트 전용 단일 모듈로 재작성)
+       ========================================================= */
+
+    /* ---------- 0) 전역 에러 표시 (원인 추적용) ---------- */
+    window.onerror = function (msg, src, line, col) {
+      try {
+        const box = document.getElementById('statusMessage');
+        if (box) box.innerText = `❌ JS Error: ${msg} (line ${line}:${col})`;
+      } catch (e) {}
+      return false;
+    };
+
+    /* ---------- 1) 널 세이프 DOM 헬퍼 ---------- */
+    function el(id) { return document.getElementById(id); }
+    function setText(id, text) { const n = el(id); if (n) n.innerText = text; }
+    function setHTML(id, html) { const n = el(id); if (n) n.innerHTML = html; }
+    function setDisplay(id, value) { const n = el(id); if (n) n.style.display = value; }
+    function setClassName(id, value) { const n = el(id); if (n) n.className = value; }
+    function addCls(id, cls) { const n = el(id); if (n) n.classList.add(cls); }
+    function removeCls(id, cls) { const n = el(id); if (n) n.classList.remove(cls); }
+    function toggleCls(id, cls, force) { const n = el(id); if (n) n.classList.toggle(cls, force); }
+    function on(id, evt, handler) { const n = el(id); if (n) n.addEventListener(evt, handler); }
+
+    /* ---------- 2) 소켓 초기화 (로드 실패 방어) ---------- */
+    let socket = null;
+    if (typeof io === 'undefined') {
+      setText('statusMessage', '❌ socket.io 스크립트를 불러오지 못했습니다. (/socket.io/socket.io.js 확인)');
+      setText('myNameDisplay', 'Offline');
+    } else {
+      try {
+        socket = io();
+      } catch (e) {
+        setText('statusMessage', '❌ 서버 연결 초기화 실패: ' + e.message);
+      }
+    }
+    // socket이 null이어도 나머지 코드가 죽지 않도록 감싸는 래퍼
+    function emit(event, payload) { if (socket) socket.emit(event, payload); }
+    function sub(event, handler) { if (socket) socket.on(event, handler); }
+
     const LINE_HEIGHT = 38;
 
+    // Practice Mode 전용 샘플 문장 — 서버 왕복 없이 클라이언트에서 바로 선택한다.
+    const PRACTICE_TEXTS = [
+      "the quick brown fox jumps over the lazy dog while the sun sets over the quiet hills",
+      "practice makes perfect and every keystroke brings you closer to mastering your speed",
+      "type steadily and focus on accuracy before you start chasing a higher words per minute score",
+      "a good typist knows that rhythm matters more than raw speed when accuracy is on the line",
+      "consistency beats intensity when you are building a new habit one small step at a time",
+      "keep your eyes on the words ahead and let your fingers follow without looking down",
+      "small daily practice sessions add up to real improvement over the course of a few weeks"
+    ];
+
+    /* ---------- 3) 전역 상태 ---------- */
     let isRanked = false;
     let currentMode = 'time';
     let currentDuration = null;
@@ -375,6 +478,7 @@
     let countdownInterval = null;
     let gameTimerInterval = null;
     let gameEnded = false;
+
     let myRating = 1000;
     let myTrophies = 0;
     let myName = '';
@@ -386,62 +490,93 @@
     let totalTyped = 0;
     let totalErrors = 0;
     let prevVal = "";
-
     let myCaretEl = null;
     let oppCaretEl = null;
+
     let isCreatingPrivateRoom = false;
     let privateRoomCode = null;
+    let isPrivateRoomMatch = false;   // 커스텀룸(친선) 경기 여부
+    let isQueueWaiting = false;       // 서버 매칭 대기열에 들어가 있는 상태
+
+    // Practice Mode 상태 — 매치와 동일한 입력 로직을 그대로 공유하며, 시간 제한만 없다.
+    const practice = {
+      active: false,
+      origin: null,          // 'menu' | 'queue' — 종료 시 돌아갈 화면만 결정한다
+      lastTextIdx: -1        // 같은 문장이 연속으로 나오지 않게 하기 위한 인덱스
+    };
+
     let lastOpponentId = null;
     let lastRoomId = null;
     let lastMatchStats = null;
     let selectedReportReason = null;
-    let reportedMatchIds = new Set();
-    let isSoloPractice = false;
-    let practiceChunksTyped = 0;
+    const reportedMatchIds = new Set();
 
-    // --- Report ---
-    function openReportModal() {
-      selectedReportReason = null;
-      document.querySelectorAll('.report-option').forEach(o => o.classList.remove('selected'));
-      document.querySelectorAll('input[name="reportReason"]').forEach(r => r.checked = false);
-      const submitBtn = document.querySelector('.report-modal-box .btn-save');
-      if (submitBtn) { submitBtn.disabled = false; submitBtn.innerText = 'Submit Report'; }
-      document.getElementById('reportModalOverlay').classList.add('show');
+    let lastKeystrokeTime = null;
+    let pendingDeltas = [];
+
+    let rematchRoomId = null;
+    let rematchDeadline = null;
+    let rematchCountdownInterval = null;
+    let rematchRequestedByMe = false;
+
+    let currentView = 'play';
+    let currentLeaderboardTab = 'rank';
+
+    /* ---------- 4) 공통 UI ---------- */
+    function setStatus(text) { setText('statusMessage', text || ''); }
+    function setTitle(text) { setText('title', text); }
+
+    function setLobbyVisible(visible) {
+      const lobby = el('lobbyHeader');
+      const tabs = el('headerTabs');
+      if (lobby) { if (visible) lobby.classList.remove('hidden'); else lobby.classList.add('hidden'); }
+      if (tabs) tabs.style.display = visible ? '' : 'none';
     }
 
-    function closeReportModal() {
-      document.getElementById('reportModalOverlay').classList.remove('show');
+    // 대기열 컨트롤(Enter Solo Practice / Cancel Queue) 노출 단일 진입점.
+    // 연습 중에는 서버 대기열이 살아 있어도 버튼을 화면에 다시 띄우지 않는다.
+    function setQueueControlsVisible(visible) {
+      isQueueWaiting = !!visible && !isPrivateRoomMatch;
+      setDisplay('waitingControls', (isQueueWaiting && !practice.active) ? 'block' : 'none');
     }
 
-    function selectReportReason(reason, el) {
-      selectedReportReason = reason;
-      document.querySelectorAll('.report-option').forEach(o => o.classList.remove('selected'));
-      if (el) el.closest('.report-option').classList.add('selected');
+    // 매치 확정 / 카운트다운 진입 시 호출 — 대기열 상태와 컨트롤을 함께 정리
+    function hideQueueControls() {
+      isQueueWaiting = false;
+      setDisplay('waitingControls', 'none');
     }
 
-    function submitReport() {
-      if (!selectedReportReason) { document.getElementById('statusMessage').innerText = '⚠️ Please select a reason.'; return; }
-      if (!lastOpponentId || !lastRoomId) { document.getElementById('statusMessage').innerText = '⚠️ No opponent data available.'; closeReportModal(); return; }
-      if (reportedMatchIds.has(lastRoomId)) { document.getElementById('statusMessage').innerText = '⚠️ You already reported in this match.'; closeReportModal(); return; }
-      const submitBtn = document.querySelector('.report-modal-box .btn-save');
-      if (submitBtn) { submitBtn.disabled = true; submitBtn.innerText = 'Submitting...'; }
-      socket.emit('report_player', { targetPlayerId: lastOpponentId, roomId: lastRoomId, reason: selectedReportReason, matchStats: lastMatchStats || {} });
-      reportedMatchIds.add(lastRoomId);
+    function showLobbyMenu() {
+      teardownPractice();
+      hideQueueControls();
+      setDisplay('roomWaiting', 'none');
+      setDisplay('gameArea', 'none');
+      setDisplay('modeSelect', 'flex');
+      setDisplay('typeTab', 'flex');
+      setDisplay('mainModeButtons', 'flex');
+      setLobbyVisible(true);
+      setTitle('Select Match Duration');
     }
 
-    socket.on('reportResult', (data) => {
-      closeReportModal();
-      const submitBtn = document.querySelector('.report-modal-box .btn-save');
-      if (submitBtn) { submitBtn.disabled = false; submitBtn.innerText = 'Submit Report'; }
-      if (data.success) {
-        document.getElementById('statusMessage').innerText = '✅ Report submitted. Thank you!';
-        const reportBtn = document.getElementById('reportBtn');
-        if (reportBtn) { reportBtn.disabled = true; reportBtn.innerText = 'Reported'; }
-      } else {
-        document.getElementById('statusMessage').innerText = '⚠️ ' + (data.message || 'Report failed.');
+    /* ---------- 5) 결과 화면 버튼 분기 ---------- */
+    function setPostMatchButtons() {
+      setDisplay('restartRow', 'block');
+      const rematchBtnEl = el('rematchBtn');
+      const findNextBtnEl = el('findNextBtn');
+      if (!rematchBtnEl || !findNextBtnEl) {
+        console.warn('[UI] rematchBtn 또는 findNextBtn 요소를 찾지 못했습니다.');
+        return;
       }
-    });
+      if (isPrivateRoomMatch) {
+        rematchBtnEl.style.display = '';
+        findNextBtnEl.style.display = 'none';
+      } else {
+        rematchBtnEl.style.display = 'none';
+        findNextBtnEl.style.display = '';
+      }
+    }
 
+    /* ---------- 6) 언락 / 상단바 ---------- */
     function applyUnlockStatus(data, options) {
       if (!data) return;
       const opts = options || {};
@@ -449,159 +584,341 @@
       requiredUnlockWins = Number.isFinite(data.requiredWins) ? data.requiredWins : requiredUnlockWins;
       rankedUnlocked = !!data.rankedUnlocked || normalWins >= requiredUnlockWins;
 
-      const rankedBtn = document.getElementById('rankedTabBtn');
-      const lockLabel = document.getElementById('rankedLockLabel');
-      const panel = document.getElementById('unlockPanel');
-      const countLabel = document.getElementById('unlockCountLabel');
-      const barFill = document.getElementById('unlockBarFill');
-      const ratio = requiredUnlockWins > 0 ? Math.min(100, Math.floor((normalWins / requiredUnlockWins) * 100)) : 100;
+      const ratio = requiredUnlockWins > 0
+        ? Math.min(100, Math.floor((normalWins / requiredUnlockWins) * 100))
+        : 100;
 
-      rankedBtn.classList.toggle('locked', !rankedUnlocked);
-      lockLabel.innerText = rankedUnlocked ? '' : `🔒 Win ${requiredUnlockWins} Casual matches`;
-      countLabel.innerText = rankedUnlocked ? 'Unlocked' : `${normalWins} / ${requiredUnlockWins} Wins`;
-      barFill.style.width = `${ratio}%`;
-      panel.classList.toggle('hidden', rankedUnlocked && !opts.keepPanel);
+      toggleCls('rankedTabBtn', 'locked', !rankedUnlocked);
+      setText('rankedLockLabel', rankedUnlocked ? '' : `🔒 Win ${requiredUnlockWins} Casual matches`);
+      setText('unlockCountLabel', rankedUnlocked ? 'Unlocked' : `${normalWins} / ${requiredUnlockWins} Wins`);
+      const bar = el('unlockBarFill');
+      if (bar) bar.style.width = `${ratio}%`;
+      toggleCls('unlockPanel', 'hidden', rankedUnlocked && !opts.keepPanel);
 
-      if (rankedUnlocked && isRanked === false) rankedBtn.classList.remove('active');
+      if (rankedUnlocked && isRanked === false) removeCls('rankedTabBtn', 'active');
       if (!rankedUnlocked && isRanked) switchMatchKind(false, true);
 
       if (data.justUnlocked || opts.justUnlocked) {
-        document.getElementById('statusMessage').innerText = `🎉 ${requiredUnlockWins} Casual wins! Ranked is now unlocked.`;
-        panel.classList.remove('hidden');
-        countLabel.innerText = 'Unlocked';
+        setStatus(`🎉 ${requiredUnlockWins} Casual wins! Ranked is now unlocked.`);
+        removeCls('unlockPanel', 'hidden');
+        setText('unlockCountLabel', 'Unlocked');
       }
     }
 
     function updateTopBar() {
-      document.getElementById('myRatingDisplay').innerText = myRating;
-      document.getElementById('myNameDisplay').innerText = myName || 'Connecting...';
-      document.getElementById('myAvatarBadge').innerText = myAvatar || '😀';
-      const trophySpan = document.getElementById('myTrophyDisplay');
-      if (trophySpan) trophySpan.innerText = myTrophies;
+      setText('myRatingDisplay', myRating);
+      setText('myNameDisplay', myName || 'Connecting...');
+      setText('myAvatarBadge', myAvatar || '😀');
+      setText('myTrophyDisplay', myTrophies);
     }
 
+    function switchMatchKind(ranked, silent) {
+      if (ranked && !rankedUnlocked) {
+        setStatus(`🔒 Ranked unlocks after ${requiredUnlockWins} Casual wins. (${normalWins}/${requiredUnlockWins})`);
+        return;
+      }
+      isRanked = ranked;
+      toggleCls('normalTabBtn', 'active', !ranked);
+      toggleCls('rankedTabBtn', 'active', ranked);
+      if (!silent) setStatus('');
+    }
+
+    /* ---------- 7) 접속 / 식별 ---------- */
     function getOrCreatePlayerCode() {
+      const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+      const makeCode = () => {
+        let result = '';
+        for (let i = 0; i < 6; i++) result += chars.charAt(Math.floor(Math.random() * chars.length));
+        return result;
+      };
       try {
         let id = localStorage.getItem('player_id');
-        // 6자리 영문+숫자 형태가 아니면 새로 생성
         if (!id || !/^[A-Z0-9]{6}$/.test(id)) {
-          const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
-          let result = '';
-          for (let i = 0; i < 6; i++) {
-            result += chars.charAt(Math.floor(Math.random() * chars.length));
-          }
-          id = result;
+          id = makeCode();
           localStorage.setItem('player_id', id);
         }
         return id;
       } catch (e) {
-        const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
-        let result = '';
-        for (let i = 0; i < 6; i++) result += chars.charAt(Math.floor(Math.random() * chars.length));
-        return result;
+        return makeCode();
       }
     }
 
-    // 서버 연결 시 identify만 보냄 (프로필 입력/전송 없음)
-    socket.on('connect', () => {
-      const code = getOrCreatePlayerCode();
-      socket.emit('identify', { playerId: 'Player #' + code });
+    sub('connect', () => {
+      emit('identify', { playerId: 'Player #' + getOrCreatePlayerCode() });
       fetchLeaderboard();
+      checkUrlRoomParam();
     });
 
-    // 서버가 부여한 Player #코드 + 랭킹/칭호 태그를 그대로 표시
-    socket.on('initUser', (data) => {
+    sub('connect_error', (err) => {
+      setStatus('⚠️ 서버 연결 실패: ' + (err && err.message ? err.message : 'unknown'));
+    });
+
+    sub('disconnect', () => {
+      setStatus('⚠️ Disconnected from server. Reconnecting...');
+    });
+
+    sub('initUser', (data) => {
+      if (!data) return;
       myRating = data.rating;
       myTrophies = data.trophies || 0;
       if (data.name) myName = data.name;
       if (data.avatar) myAvatar = data.avatar;
       applyUnlockStatus(data);
-      // 서버가 받은 닉네임에서 코드만 추출해 localStorage에 저장 (재접속 시 유지)
+
       if (data.name) {
         const code = data.name.replace(/^Player #/, '').replace(/\s*\[.*\]\s*$/, '').trim();
         if (/^[A-Z0-9]{6}$/.test(code)) {
-          try { localStorage.setItem('player_id', code); } catch(e) {}
+          try { localStorage.setItem('player_id', code); } catch (e) {}
         }
       }
       updateTopBar();
       fetchLeaderboard();
     });
 
-    socket.on('unlockStatus', (data) => {
+    sub('unlockStatus', (data) => {
       applyUnlockStatus(data, { justUnlocked: !!(data && data.justUnlocked) });
     });
 
-    socket.on('rankedLocked', (data) => {
-      applyUnlockStatus(data);
-      isRanked = false;
-      document.getElementById('normalTabBtn').classList.add('active');
-      document.getElementById('rankedTabBtn').classList.remove('active');
-      document.getElementById('waitingControls').style.display = 'none';
-      document.getElementById('modeSelect').style.display = 'flex';
-      document.getElementById('typeTab').style.display = 'flex';
-      setLobbyVisible(true);
-      backToMainModes();
-      document.getElementById('title').innerText = 'Select Match Duration';
-      document.getElementById('statusMessage').innerText = `🔒 Ranked unlocks after ${requiredUnlockWins} Casual wins. (${normalWins}/${requiredUnlockWins})`;
-    });
-
-    socket.on('trophyUpdate', (data) => {
+    sub('trophyUpdate', (data) => {
+      if (!data) return;
       myTrophies = data.trophies;
       updateTopBar();
     });
 
-    function switchMatchKind(ranked, silent) {
-      if (ranked && !rankedUnlocked) {
-        document.getElementById('statusMessage').innerText = `🔒 Ranked unlocks after ${requiredUnlockWins} Casual wins. (${normalWins}/${requiredUnlockWins})`;
+    sub('rankedLocked', (data) => {
+      applyUnlockStatus(data);
+      isRanked = false;
+      addCls('normalTabBtn', 'active');
+      removeCls('rankedTabBtn', 'active');
+      isCreatingPrivateRoom = false;
+      isPrivateRoomMatch = false;
+      showLobbyMenu();
+      setStatus(`🔒 Ranked unlocks after ${requiredUnlockWins} Casual wins. (${normalWins}/${requiredUnlockWins})`);
+    });
+
+    sub('sessionReplaced', () => {
+      gameEnded = true;
+      teardownPractice();
+      const ti = el('typingInput');
+      if (ti) ti.disabled = true;
+      hideQueueControls();
+      setDisplay('gameArea', 'none');
+      removeCls('roomCodeModal', 'show');
+      removeCls('reportModalOverlay', 'show');
+      setTitle('Session replaced');
+      setStatus('⚠️ Other session connected — this tab has been disconnected.');
+      alert('Other session connected.\nThis tab has been disconnected because the same account is now active elsewhere.');
+    });
+
+    /* ---------- 8) 뷰 / 리더보드 ---------- */
+    function switchView(view) {
+      currentView = view;
+      document.querySelectorAll('.header-tab').forEach((btn) => {
+        btn.classList.toggle('active', btn.dataset.view === view);
+      });
+      toggleCls('playView', 'active', view === 'play');
+      toggleCls('rankView', 'active', view === 'rank');
+      toggleCls('trophyView', 'active', view === 'trophy');
+      if (view === 'rank' || view === 'trophy') {
+        currentLeaderboardTab = view;
+        fetchLeaderboard();
+      }
+    }
+
+    function fetchLeaderboard() {
+      if (!socket || !socket.connected) return;
+      emit('requestLeaderboard', { sortBy: currentLeaderboardTab });
+    }
+
+    sub('leaderboardData', (data) => {
+      if (!data) return;
+      const targetId = data.sortBy === 'rank' ? 'rankLeaderboard' : 'trophyLeaderboard';
+      if (!el(targetId)) return;
+      if (!data.entries || data.entries.length === 0) {
+        setHTML(targetId, '<div class="lb-empty">No records yet.</div>');
         return;
       }
-      isRanked = ranked;
-      document.getElementById('normalTabBtn').classList.toggle('active', !ranked);
-      document.getElementById('rankedTabBtn').classList.toggle('active', ranked);
-      if (!silent) document.getElementById('statusMessage').innerText = '';
+      const medals = ['🥇', '🥈', '🥉'];
+      let html = '';
+      data.entries.forEach((entry, idx) => {
+        const rank = idx + 1;
+        const rankDisplay = rank <= 3 ? `${medals[rank - 1]} #${rank}` : `#${rank}`;
+        const rowClass = 'lb-row'
+          + (entry.isMe ? ' me' : '')
+          + (rank === 1 ? ' top1' : rank === 2 ? ' top2' : rank === 3 ? ' top3' : '');
+        const score = data.sortBy === 'rank' ? entry.rating : entry.trophies;
+        html += `<div class="${rowClass}">`
+          + `<span class="lb-rank">${rankDisplay}</span>`
+          + `<span class="lb-avatar">${entry.avatar}</span>`
+          + `<span class="lb-name">${entry.name}</span>`
+          + `<span class="lb-score">${score}</span>`
+          + `</div>`;
+      });
+      setHTML(targetId, html);
+    });
+
+    /* ---------- 9) 게임 초기화 / 매칭 ---------- */
+    function resetGameState() {
+      clearInterval(countdownInterval);
+      clearInterval(gameTimerInterval);
+      clearRematchState();
+      teardownPractice();
+      gameEnded = false;
+
+      lastKeystrokeTime = null;
+      pendingDeltas = [];
+      totalTyped = 0;
+      totalErrors = 0;
+      prevVal = "";
+
+      const timerEl = el('timer');
+      if (timerEl && timerEl.parentElement) timerEl.parentElement.style.display = '';
+
+      const ti = el('typingInput');
+      if (ti) { ti.value = ''; ti.disabled = true; }
+
+      const qd = el('quoteDisplay');
+      if (qd) { qd.innerHTML = ''; qd.style.transform = 'translateY(0px)'; }
+
+      addCls('matchupBar', 'hidden-state');
+      setDisplay('practiceExitRow', 'none');
+      setDisplay('leaveMatchRow', 'none');
     }
 
-    function backToMainModes() {
-      document.getElementById('mainModeButtons').style.display = 'flex';
+    function enterQueueUI() {
+      setDisplay('modeSelect', 'none');
+      setDisplay('typeTab', 'none');
+      setDisplay('roomWaiting', 'none');
+      setLobbyVisible(false);
+      setTitle('Finding opponent...');
+      setStatus(isRanked ? 'Searching for a similar rank...' : 'Looking for an opponent...');
+      setQueueControlsVisible(true);
+    }
+
+    function selectMode(mode, selectedDuration) {
+      resetGameState();
+      currentMode = mode;
+      currentDuration = mode === 'time' ? selectedDuration : null;
+
+      if (isCreatingPrivateRoom) {
+        isCreatingPrivateRoom = false;
+        isPrivateRoomMatch = true;
+        hideQueueControls();
+        emit('createRoom', { mode, duration: currentDuration });
+        return;
+      }
+
+      isPrivateRoomMatch = false;
+      emit('selectMode', { mode, duration: currentDuration, isRanked });
+      enterQueueUI();
+    }
+
+    function findNextMatch() {
+      if (rematchRoomId) emit('declineRematch', { roomId: rematchRoomId });
+      resetGameState();
+      isPrivateRoomMatch = false;
+      setHTML('resultBanner', '');
+      setClassName('resultBanner', 'result-banner');
+      setDisplay('restartRow', 'none');
+      setDisplay('gameArea', 'none');
+      enterQueueUI();
+      emit('selectMode', { mode: currentMode, duration: currentDuration, isRanked });
+    }
+
+    function cancelSearch() {
+      emit('cancelSearch');
+      isPrivateRoomMatch = false;
       isCreatingPrivateRoom = false;
+      resetGameState();
+      setHTML('resultBanner', '');
+      setClassName('resultBanner', 'result-banner');
+      setDisplay('restartRow', 'none');
+      showLobbyMenu();
+      setStatus('');
+      applyUnlockStatus({ normalWins, requiredWins: requiredUnlockWins, rankedUnlocked });
     }
 
+    function leaveCurrentMatch() {
+      if (gameEnded || practice.active) return;
+      if (!confirm('Leave this match? This will count as a forfeit (loss).')) return;
+      emit('leaveMatch');
+      setDisplay('leaveMatchRow', 'none');
+    }
+
+    sub('waiting', (data) => {
+      setQueueControlsVisible(true);
+      setStatus((data && data.isRanked) ? 'Searching for a similar rank...' : 'Looking for an opponent...');
+    });
+
+    // 매치 확정 계열 이벤트 — 연습 중이면 연습을 즉시 종료하고 대기열 영역을 숨긴다.
+    sub('matchFound', () => {
+      abortPracticeForMatch();
+      hideQueueControls();
+      setTitle('Opponent found!');
+    });
+    sub('countdown', (data) => {
+      abortPracticeForMatch();
+      hideQueueControls();
+      const sec = data && Number.isFinite(data.seconds) ? data.seconds : null;
+      if (sec !== null) setTitle(`Starting in ${sec}...`);
+    });
+
+    /* ---------- 10) 커스텀 룸 ---------- */
     function startPrivateRoom() {
       isCreatingPrivateRoom = true;
-      document.getElementById('statusMessage').innerText = 'Select duration for custom room';
-      document.getElementById('mainModeButtons').style.display = 'flex';
+      setStatus('Select duration for custom room');
+      setDisplay('mainModeButtons', 'flex');
     }
 
     function joinPrivateRoom() {
-      const code = document.getElementById('inviteCodeInput').value.toUpperCase().trim();
-      if (!code || code.length < 4) { document.getElementById('statusMessage').innerText = 'Please enter a valid room code.'; return; }
-      socket.emit('joinRoom', { code });
-      document.getElementById('statusMessage').innerText = 'Joining room...';
-      document.getElementById('waitingControls').style.display = 'block';
-      document.getElementById('modeSelect').style.display = 'none';
-      document.getElementById('typeTab').style.display = 'none';
+      const input = el('inviteCodeInput');
+      const code = input ? input.value.toUpperCase().trim() : '';
+      if (!code || code.length < 4) {
+        setStatus('Please enter a valid room code.');
+        return;
+      }
+      isPrivateRoomMatch = true;
+      emit('joinRoom', { code });
+      setStatus('Joining room...');
+      hideQueueControls();
+      setDisplay('modeSelect', 'none');
+      setDisplay('typeTab', 'none');
       setLobbyVisible(false);
-      document.getElementById('title').innerText = 'Joining room...';
+      setTitle('Joining room...');
     }
 
     function cancelPrivateRoom() {
-      socket.emit('cancelRoom');
+      emit('cancelRoom');
       privateRoomCode = null;
-      history.replaceState(null, '', window.location.pathname);
-      document.getElementById('copyInviteLinkBtn').style.display = 'none';
-      document.getElementById('roomWaiting').style.display = 'none';
-      document.getElementById('modeSelect').style.display = 'flex';
-      document.getElementById('typeTab').style.display = 'flex';
-      setLobbyVisible(true);
-      document.getElementById('title').innerText = 'Select Match Duration';
-      document.getElementById('statusMessage').innerText = '';
+      isPrivateRoomMatch = false;
+      isCreatingPrivateRoom = false;
+      try { history.replaceState(null, '', window.location.pathname); } catch (e) {}
+      setDisplay('copyInviteLinkBtn', 'none');
+      showLobbyMenu();
+      setStatus('');
     }
 
-    // 메인 대기실의 Copy Invite Link 버튼 — 현재 ?room=CODE URL을 클립보드에 복사
+    function closeRoomModal() { removeCls('roomCodeModal', 'show'); }
+
+    function buildInviteUrl() {
+      return window.location.origin + window.location.pathname + '?room=' + privateRoomCode;
+    }
+
+    function fallbackCopy(text, done) {
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      ta.style.position = 'fixed';
+      ta.style.opacity = '0';
+      document.body.appendChild(ta);
+      ta.select();
+      try { document.execCommand('copy'); if (done) done(); } catch (e) {}
+      document.body.removeChild(ta);
+    }
+
     function copyInviteLinkToClipboard() {
-      if (!privateRoomCode) { document.getElementById('statusMessage').innerText = '⚠️ No active room.'; return; }
-      const url = window.location.origin + window.location.pathname + '?room=' + privateRoomCode;
-      const done = () => { document.getElementById('statusMessage').innerText = '✅ Invite link copied!'; };
+      if (!privateRoomCode) { setStatus('⚠️ No active room.'); return; }
+      const url = buildInviteUrl();
+      const done = () => setStatus('✅ Invite link copied!');
       if (navigator.clipboard && navigator.clipboard.writeText) {
         navigator.clipboard.writeText(url).then(done).catch(() => fallbackCopy(url, done));
       } else {
@@ -609,115 +926,86 @@
       }
     }
 
-    function fallbackCopy(text, done) {
-      const ta = document.createElement('textarea');
-      ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
-      document.body.appendChild(ta); ta.select();
-      try { document.execCommand('copy'); if (done) done(); } catch (e) {}
-      document.body.removeChild(ta);
-    }
-
     function copyInviteLink() {
-      const url = window.location.origin + window.location.pathname + '?room=' + privateRoomCode;
-      if (navigator.clipboard) {
-        navigator.clipboard.writeText(url).then(() => { document.getElementById('statusMessage').innerText = '✅ Link copied!'; });
+      if (!privateRoomCode) { setStatus('⚠️ No active room.'); return; }
+      const url = buildInviteUrl();
+      const done = () => setStatus('✅ Link copied!');
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(url).then(done).catch(() => fallbackCopy(url, done));
       } else {
-        const ta = document.createElement('textarea');
-        ta.value = url; document.body.appendChild(ta);
-        ta.select(); document.execCommand('copy'); document.body.removeChild(ta);
-        document.getElementById('statusMessage').innerText = '✅ Link copied!';
+        fallbackCopy(url, done);
       }
-    }
-
-    function closeRoomModal() {
-      document.getElementById('roomCodeModal').classList.remove('show');
     }
 
     function checkUrlRoomParam() {
       const params = new URLSearchParams(window.location.search);
       const roomCode = params.get('room');
-      if (roomCode) {
-        document.getElementById('inviteCodeInput').value = roomCode.toUpperCase();
-        joinPrivateRoom();
-      }
+      if (!roomCode) return;
+      const input = el('inviteCodeInput');
+      if (input) input.value = roomCode.toUpperCase();
+      joinPrivateRoom();
     }
 
-    function resetGameState() {
-      clearInterval(countdownInterval);
-      clearInterval(gameTimerInterval);
-      gameEnded = false;
-      totalTyped = 0;
-      totalErrors = 0;
-      prevVal = "";
-      document.getElementById('timer').parentElement.style.display = '';
-      document.getElementById('typingInput').value = '';
-      document.getElementById('typingInput').disabled = true;
-      document.getElementById('quoteDisplay').innerHTML = '';
-      document.getElementById('quoteDisplay').style.transform = 'translateY(0px)';
-      document.getElementById('matchupBar').classList.add('hidden-state');
-      document.getElementById('practiceExitRow').style.display = 'none';
-      if (oppCaretEl) oppCaretEl.style.display = 'none';
-    }
-
-    function selectMode(mode, selectedDuration) {
-      resetGameState();
-      currentMode = mode;
-      currentDuration = mode === 'time' ? selectedDuration : null;
-      if (isCreatingPrivateRoom) {
-        isCreatingPrivateRoom = false;
-        socket.emit('createRoom', { mode, duration: currentDuration });
-        return;
-      }
-      socket.emit('selectMode', { mode, duration: currentDuration, isRanked });
-      document.getElementById('modeSelect').style.display = 'none';
-      document.getElementById('typeTab').style.display = 'none';
+    sub('roomCreated', (data) => {
+      if (!data) return;
+      privateRoomCode = data.code;
+      isPrivateRoomMatch = true;
+      hideQueueControls();
+      try { history.replaceState(null, '', '?room=' + data.code); } catch (e) {}
+      setText('roomCodeDisplay', data.code);
+      addCls('roomCodeModal', 'show');
+      setText('roomWaitingCode', data.code);
+      setDisplay('roomWaiting', 'block');
+      setDisplay('copyInviteLinkBtn', 'inline-block');
+      setDisplay('modeSelect', 'none');
+      setDisplay('typeTab', 'none');
       setLobbyVisible(false);
-      document.getElementById('title').innerText = "Finding opponent...";
-      document.getElementById('statusMessage').innerText = isRanked
-        ? "Searching for a similar rank..."
-        : "Looking for an opponent...";
-      document.getElementById('waitingControls').style.display = 'block';
-    }
+      setTitle('Waiting in room...');
+      setStatus('');
+    });
 
-    function rematchSameMode() {
-      resetGameState();
-      document.getElementById('resultBanner').innerHTML = '';
-      document.getElementById('resultBanner').className = 'result-banner';
-      document.getElementById('restartRow').style.display = 'none';
-      setLobbyVisible(false);
-      document.getElementById('title').innerText = "Finding opponent...";
-      document.getElementById('statusMessage').innerText = isRanked
-        ? "Searching for a similar rank..."
-        : "Looking for an opponent...";
-      document.getElementById('waitingControls').style.display = 'block';
-      socket.emit('selectMode', { mode: currentMode, duration: currentDuration, isRanked });
-    }
+    sub('roomJoined', (data) => {
+      if (!data) return;
+      privateRoomCode = data.code;
+      isPrivateRoomMatch = true;
+      hideQueueControls();
+      setTitle('Opponent joining soon...');
+      setStatus('');
+    });
 
-    function cancelSearch() {
-      socket.emit('cancelSearch');
-      isSoloPractice = false;
-      practiceChunksTyped = 0;
-      const enterBtn = document.getElementById('enterPracticeBtn');
-      if (enterBtn) { enterBtn.disabled = false; enterBtn.innerText = '🎯 Enter Solo Practice'; }
-      resetGameState();
-      document.getElementById('waitingControls').style.display = 'none';
-      document.getElementById('gameArea').style.display = 'none';
-      document.getElementById('resultBanner').innerHTML = '';
-      document.getElementById('resultBanner').className = 'result-banner';
-      document.getElementById('restartRow').style.display = 'none';
-      backToMainModes();
-      document.getElementById('modeSelect').style.display = 'flex';
-      document.getElementById('typeTab').style.display = 'flex';
-      setLobbyVisible(true);
-      document.getElementById('title').innerText = "Select Match Duration";
-      document.getElementById('statusMessage').innerText = '';
-      applyUnlockStatus({ normalWins, requiredWins: requiredUnlockWins, rankedUnlocked });
-    }
+    sub('roomOpponentJoined', () => { setStatus('Opponent joined the room!'); });
 
+    sub('customRoomCountdown', (data) => {
+      closeRoomModal();
+      hideQueueControls();
+      setDisplay('roomWaiting', 'none');
+      setStatus('');
+      let sec = data && Number.isFinite(data.seconds) ? data.seconds : 3;
+      setTitle(`Starting in ${sec}...`);
+      setDisplay('gameArea', 'block');
+      setDisplay('modeSelect', 'none');
+      setDisplay('typeTab', 'none');
+      const cd = setInterval(() => {
+        sec--;
+        if (sec <= 0) clearInterval(cd);
+        else setTitle(`Starting in ${sec}...`);
+      }, 1000);
+    });
+
+    sub('roomError', (data) => {
+      setStatus('⚠️ ' + ((data && data.message) || 'Room error'));
+      privateRoomCode = null;
+      isPrivateRoomMatch = false;
+      isCreatingPrivateRoom = false;
+      showLobbyMenu();
+    });
+
+    /* ---------- 11) 렌더링 / 캐럿 / 타이머 ---------- */
     function renderQuote() {
-      const qd = document.getElementById('quoteDisplay');
+      const qd = el('quoteDisplay');
+      if (!qd) return;
       qd.innerHTML = '';
-      sampleText.split('').forEach(char => {
+      sampleText.split('').forEach((char) => {
         const span = document.createElement('span');
         span.className = 'char';
         span.innerText = char;
@@ -734,13 +1022,15 @@
     }
 
     function positionCaret(caretEl, charIndex) {
+      if (!caretEl) return;
       const spans = document.querySelectorAll('span.char');
-      if (spans.length === 0 || !caretEl) return;
+      if (spans.length === 0) return;
       if (charIndex >= spans.length) {
         const last = spans[spans.length - 1];
         caretEl.style.transform = `translate(${last.offsetLeft + last.offsetWidth}px, ${last.offsetTop}px)`;
       } else {
         const target = spans[Math.max(0, charIndex)];
+        if (!target) return;
         caretEl.style.transform = `translate(${target.offsetLeft}px, ${target.offsetTop}px)`;
       }
       caretEl.style.display = 'block';
@@ -754,23 +1044,25 @@
     }
 
     function updateViewportScroll(row) {
-      document.getElementById('quoteDisplay').style.transform = `translateY(-${Math.max(0, row) * LINE_HEIGHT}px)`;
+      const qd = el('quoteDisplay');
+      if (qd) qd.style.transform = `translateY(-${Math.max(0, row) * LINE_HEIGHT}px)`;
     }
 
     function startCountdown() {
+      hideQueueControls();   // 카운트다운 진입 = 대기열 컨트롤 제거
       clearInterval(countdownInterval);
       countdownInterval = setInterval(() => {
         const remainingMs = serverStartTime - Date.now();
         if (remainingMs <= 0) {
           clearInterval(countdownInterval);
-          document.getElementById('title').innerText = "Start typing!";
-          const ti = document.getElementById('typingInput');
-          ti.disabled = false;
-          ti.focus();
-          document.getElementById('matchupBar').classList.add('hidden-state');
+          setTitle('Start typing!');
+          const ti = el('typingInput');
+          if (ti) { ti.disabled = false; ti.readOnly = false; ti.focus(); }
+          addCls('matchupBar', 'hidden-state');
+          setDisplay('leaveMatchRow', 'block');
           startGameTimer();
         } else {
-          document.getElementById('title').innerText = `Starting in ${Math.ceil(remainingMs / 1000)}...`;
+          setTitle(`Starting in ${Math.ceil(remainingMs / 1000)}...`);
         }
       }, 100);
     }
@@ -780,263 +1072,472 @@
       gameTimerInterval = setInterval(() => {
         const elapsed = (Date.now() - serverStartTime) / 1000;
         const remaining = Math.max(0, Math.round(duration - elapsed));
-        document.getElementById('timer').innerText = remaining;
-        if (remaining <= 0) document.getElementById('typingInput').disabled = true;
+        setText('timer', remaining);
+        if (remaining <= 0) {
+          const ti = el('typingInput');
+          if (ti) ti.disabled = true;
+        }
       }, 200);
     }
 
-    document.getElementById('reportModalOverlay').addEventListener('click', (e) => {
-      if (e.target.id === 'reportModalOverlay') closeReportModal();
-    });
+    /* =========================================================
+       11-B) 타이핑 입력 — Practice와 매치가 완전히 동일한 로직을 공유한다.
+       ---------------------------------------------------------
+       유일한 차이는:
+         · Practice: 타이머 없음(무제한), 문장을 다 치면 다음 문장으로 계속 진행,
+                      서버로 진행도를 보내지 않는다 (상대가 없으므로).
+         · 매치(1v1/커스텀룸): 서버가 준 시간 제한이 있고, 문장을 다 치면
+                      입력을 잠그고 서버에 완료를 알린다.
+       측정 지표는 Accuracy 하나뿐이다 (WPM 없음).
+       ========================================================= */
 
-    document.getElementById('quoteViewport').addEventListener('click', () => {
-      if (!gameEnded) document.getElementById('typingInput').focus();
-    });
+    function pickPracticeText() {
+      let idx;
+      do {
+        idx = Math.floor(Math.random() * PRACTICE_TEXTS.length);
+      } while (PRACTICE_TEXTS.length > 1 && idx === practice.lastTextIdx);
+      practice.lastTextIdx = idx;
+      return PRACTICE_TEXTS[idx];
+    }
 
-    const NON_TEXT_KEYS = new Set([
-      'Shift','Control','Alt','Meta','CapsLock','Tab','Escape',
-      'ScrollLock','NumLock','Pause',
-      'ArrowUp','ArrowDown','ArrowLeft','ArrowRight',
-      'Home','End','PageUp','PageDown','Insert','Delete',
-      'F1','F2','F3','F4','F5','F6','F7','F8','F9','F10','F11','F12'
-    ]);
+    // 현재 문장을 화면에 그리고 입력창을 비운다 (최초 진입 / 다음 문장 전환 공용)
+    function showPracticeText(text) {
+      sampleText = text;
+      prevVal = '';
+      const ti = el('typingInput');
+      if (ti) ti.value = '';
+      renderQuote();
+      if (oppCaretEl) oppCaretEl.style.display = 'none';
+    }
 
-    document.getElementById('typingInput').addEventListener('keydown', (e) => {
-      if (gameEnded) return;
-      if (NON_TEXT_KEYS.has(e.key)) { e.preventDefault(); return; }
-      if (e.ctrlKey || e.altKey || e.metaKey) { e.preventDefault(); return; }
-      if (e.key.startsWith('Arrow') || e.key === 'Tab' || e.key === 'Escape') { e.preventDefault(); return; }
-    });
+    // 매치와 동일한 화면(입력창, 캐럿, 정오답 색칠, 정확도)을 그대로 쓰고, 타이머만 숨긴다.
+    function renderPracticeScreen(text) {
+      setDisplay('modeSelect', 'none');
+      setDisplay('typeTab', 'none');
+      setDisplay('roomWaiting', 'none');
+      setDisplay('waitingControls', 'none');
+      setDisplay('gameArea', 'block');
+      removeCls('roomCodeModal', 'show');
+      setLobbyVisible(false);
 
-    document.getElementById('typingInput').addEventListener('input', (e) => {
-      if (gameEnded) return;
-      if (e.isComposing) return;
-      let val = e.target.value;
-      if (val.length > sampleText.length) { val = val.substring(0, sampleText.length); e.target.value = val; }
+      setTitle('Solo Practice — type as long as you want');
+      setStatus('');
+      setText('modeBadge', '[Solo Practice — No Time Limit]');
+      setHTML('resultBanner', '');
+      setClassName('resultBanner', 'result-banner');
+      setDisplay('restartRow', 'none');
+      setDisplay('leaveMatchRow', 'none');
+      addCls('matchupBar', 'hidden-state');
 
-      let currentErrors = 0;
-      for (let i = 0; i < val.length; i++) { if (val[i] !== sampleText[i]) currentErrors++; }
+      // 시간 제한이 없으므로 타이머만 숨긴다 (나머지는 매치와 동일)
+      const timerEl = el('timer');
+      if (timerEl && timerEl.parentElement) timerEl.parentElement.style.display = 'none';
+      setText('accuracy', 100);
+      setDisplay('practiceExitRow', 'block');
 
-      if (val.length > prevVal.length) {
-        totalTyped += val.length - prevVal.length;
-        for (let i = prevVal.length; i < val.length; i++) { if (val[i] !== sampleText[i]) totalErrors++; }
+      showPracticeText(text);
+      const ti = el('typingInput');
+      if (ti) { ti.disabled = false; ti.readOnly = false; ti.focus(); }
+    }
+
+    function beginPractice(origin) {
+      resetGameState();               // 매치/카운트다운/재경기 잔여 상태 정리 (연습 상태 포함)
+      practice.active = true;
+      practice.origin = origin;
+      practice.lastTextIdx = -1;
+      renderPracticeScreen(pickPracticeText());
+    }
+
+    function startPracticeMode() {
+      if (practice.active) return;
+      beginPractice('menu');
+    }
+
+    function enterSoloPractice() {
+      if (practice.active || !isQueueWaiting) return;
+      beginPractice('queue');
+    }
+
+    // 연습 상태 및 연습 전용 UI 요소만 정리한다 (여러 번 호출해도 안전)
+    function teardownPractice() {
+      if (!practice.active) return;
+
+      practice.active = false;
+      practice.origin = null;
+
+      const ti = el('typingInput');
+      if (ti) { ti.value = ''; ti.disabled = true; }
+      setDisplay('practiceExitRow', 'none');
+      const timerEl = el('timer');
+      if (timerEl && timerEl.parentElement) timerEl.parentElement.style.display = '';
+      setText('accuracy', 100);
+    }
+
+    // 연습 중 서버가 매치를 확정했을 때: 연습을 끝내고 매치 화면(gameStart)을 기다린다
+    function abortPracticeForMatch() {
+      if (!practice.active) return;
+      teardownPractice();
+      setDisplay('gameArea', 'none');
+    }
+
+    function exitPractice() {
+      if (!practice.active) return;
+      const backToQueue = practice.origin === 'queue' && isQueueWaiting;
+
+      resetGameState();               // 내부에서 teardownPractice() 호출
+      setHTML('resultBanner', '');
+      setClassName('resultBanner', 'result-banner');
+      setDisplay('restartRow', 'none');
+      setDisplay('gameArea', 'none');
+
+      if (backToQueue) {
+        // 서버 대기열은 연습 내내 그대로 유지되어 있으므로 대기 화면만 복원한다
+        setLobbyVisible(false);
+        setTitle('Finding opponent...');
+        setStatus('Still searching for an opponent...');
+        setQueueControlsVisible(true);
+      } else {
+        showLobbyMenu();
+        setStatus('');
       }
-      prevVal = val;
+    }
 
-      const netCorrect = Math.max(0, val.length - currentErrors);
-      document.querySelectorAll('span.char').forEach((span, idx) => {
-        const char = val[idx];
-        if (char == null) span.className = 'char';
-        else if (char === sampleText[idx]) span.className = 'char correct';
-        else span.className = 'char incorrect';
+    /* ---------- 12) 타이핑 입력 처리 (Practice + 매치 공용) ---------- */
+
+    function paintTypedChars(value) {
+      const qd = el('quoteDisplay');
+      if (!qd) return;
+      const spans = qd.querySelectorAll('span.char');
+      spans.forEach((span, i) => {
+        if (i < value.length) span.className = 'char ' + (value[i] === sampleText[i] ? 'correct' : 'incorrect');
+        else span.className = 'char';
       });
+    }
 
-      positionCaret(myCaretEl, val.length);
-      updateViewportScroll(getRowForIndex(val.length));
+    function updateAccuracyDisplay() {
+      const accuracy = totalTyped > 0
+        ? Math.round(((totalTyped - totalErrors) / totalTyped) * 100)
+        : 100;
+      setText('accuracy', accuracy);
+    }
 
-      const accuracy = totalTyped > 0 ? Math.max(0, Math.round(((totalTyped - totalErrors) / totalTyped) * 100)) : 100;
-      document.getElementById('accuracy').innerText = accuracy;
+    function onTypingInput(e) {
+      if (gameEnded) return;
+      const ti = el('typingInput');
+      if (!ti || e.target !== ti || ti.disabled) return;
 
-      // 솔로 연습 모드: 시간 제한 없음, progress 전송 불필요.
-      // 현재 청크를 모두 채우면 즉시 다음 텍스트를 요청해 무한히 이어간다 (Endless).
-      if (isSoloPractice) {
-        if (val.length >= sampleText.length) {
-          e.target.value = '';
-          prevVal = "";
-          requestMorePracticeText();
+      const value = ti.value;
+      const prev = prevVal;
+
+      // 새로 입력된 글자만 집계 (백스페이스 구간은 집계하지 않음)
+      for (let i = prev.length; i < value.length; i++) {
+        totalTyped++;
+        if (value[i] !== sampleText[i]) totalErrors++;
+      }
+      prevVal = value;
+
+      paintTypedChars(value);
+      positionCaret(myCaretEl, value.length);
+      updateViewportScroll(Math.max(0, getRowForIndex(value.length) - 1));
+      updateAccuracyDisplay();
+
+      if (!practice.active) {
+        // 매치 중일 때만 서버로 실시간 진행도 전송 (상대방 캐럿 표시용)
+        emit('typingProgress', { charIndex: value.length, totalTyped, totalErrors });
+      }
+
+      if (value.length >= sampleText.length) {
+        if (practice.active) {
+          // 연습은 시간 제한이 없으므로 다음 문장으로 계속 이어간다
+          showPracticeText(pickPracticeText());
+        } else {
+          // 매치는 문장을 다 치면 입력을 잠그고 서버에 완료를 알린다
+          ti.disabled = true;
+          setStatus('✅ Finished! Waiting for time to run out or your opponent to finish...');
+          emit('finishedTyping', { totalTyped, totalErrors });
         }
+      }
+    }
+
+    function initTypingInput() {
+      const area = el('typeArea');
+      if (area) {
+        ['paste', 'drop', 'cut'].forEach((evt) => {
+          area.addEventListener(evt, (e) => { e.preventDefault(); }, true);
+        });
+        area.addEventListener('keydown', (e) => {
+          if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End'].includes(e.key)) e.preventDefault();
+        }, true);
+      }
+      on('typingInput', 'input', onTypingInput);
+      on('quoteViewport', 'click', () => {
+        const ti = el('typingInput');
+        if (ti && !ti.disabled) ti.focus();
+      });
+    }
+
+    /* ---------- 13) 대전 시작 ---------- */
+
+    // 순위 → CSS 티어 클래스 매핑. rank가 숫자가 아니거나 100 밖이면 null.
+    function getRankTierClass(rank) {
+      const r = Number(rank);
+      if (!Number.isFinite(r) || r < 1 || r > 100) return null;
+      if (r === 1) return 'rank-tier-1';
+      if (r <= 3) return 'rank-tier-3';
+      if (r <= 10) return 'rank-tier-10';
+      return 'rank-tier-100';
+    }
+
+    // 뱃지 렌더링 — 엘리먼트 부재/랭크 부재 모두 안전하게 처리
+    function renderRankBadge(elId, rank) {
+      const n = el(elId);
+      if (!n) return;
+      const tierClass = getRankTierClass(rank);
+      if (!tierClass) {
+        n.textContent = '';
+        n.className = 'rank-badge hidden-badge';
         return;
       }
-
-      const percent = (val.length === sampleText.length) ? 100 : Math.floor((val.length / sampleText.length) * 100);
-
-      socket.emit('progress', { percent, accuracy, charIndex: val.length, netCorrect, totalTyped, totalErrors });
-    });
-
-    // --- SPA View Switching ---
-    let currentView = 'play';
-    let currentLeaderboardTab = 'rank';
-
-    function setLobbyVisible(visible) {
-      const lobby = document.getElementById('lobbyHeader');
-      const tabs = document.getElementById('headerTabs');
-      if (visible) { lobby.classList.remove('hidden'); tabs.style.display = ''; }
-      else { lobby.classList.add('hidden'); tabs.style.display = 'none'; }
+      n.textContent = `#${Number(rank)}`;
+      n.className = `rank-badge ${tierClass}`;
     }
 
-    function switchView(view) {
-      currentView = view;
-      document.querySelectorAll('.header-tab').forEach(btn => { btn.classList.toggle('active', btn.dataset.view === view); });
-      document.getElementById('playView').classList.toggle('active', view === 'play');
-      document.getElementById('rankView').classList.toggle('active', view === 'rank');
-      document.getElementById('trophyView').classList.toggle('active', view === 'trophy');
-      if (view === 'rank' || view === 'trophy') { currentLeaderboardTab = view; fetchLeaderboard(); }
-    }
-
-    function fetchLeaderboard() {
-      if (!socket.connected) return;
-      socket.emit('requestLeaderboard', { sortBy: currentLeaderboardTab });
-    }
-
-    socket.on('leaderboardData', (data) => {
-      const targetId = data.sortBy === 'rank' ? 'rankLeaderboard' : 'trophyLeaderboard';
-      const list = document.getElementById(targetId);
-      if (!list) return;
-      if (!data.entries || data.entries.length === 0) { list.innerHTML = '<div class="lb-empty">No records yet.</div>'; return; }
-      let html = '';
-      data.entries.forEach((entry, idx) => {
-        const rank = idx + 1;
-        const medals = ['🥇','🥈','🥉'];
-        const rankDisplay = rank <= 3 ? `${medals[rank-1]} #${rank}` : `#${rank}`;
-        const rowClass = 'lb-row' + (entry.isMe ? ' me' : '') + (rank === 1 ? ' top1' : rank === 2 ? ' top2' : rank === 3 ? ' top3' : '');
-        const score = data.sortBy === 'rank' ? entry.rating : entry.trophies;
-        html += `<div class="${rowClass}"><span class="lb-rank">${rankDisplay}</span><span class="lb-avatar">${entry.avatar}</span><span class="lb-name">${entry.name}</span><span class="lb-score">${score}</span></div>`;
-      });
-      list.innerHTML = html;
-    });
-
-    checkUrlRoomParam();
-
+    // 대치 화면(matchupBar) 렌더링 — data가 부분적으로 비어 있어도 죽지 않도록 방어
     function renderMatchupBar(data) {
-      document.getElementById('myAvatar').innerText = data.myAvatar || '😀';
-      document.getElementById('oppAvatar').innerText = data.opponentAvatar || '👤';
-      document.getElementById('myMatchupName').innerText = data.myName || 'Me';
-      document.getElementById('oppMatchupName').innerText = data.opponentName || 'Opponent';
-      document.getElementById('myTierBadge').innerText = isRanked ? `MMR ${data.myRating}` : `🏆 ${data.myTrophies || 0}`;
-      document.getElementById('oppTierBadge').innerText = isRanked ? `MMR ${data.opponentRating}` : `🏆 ${data.opponentTrophies || 0}`;
-      document.getElementById('matchupBar').classList.remove('hidden-state');
+      const d = data || {};
+      setText('myAvatar', d.myAvatar || '😀');
+      setText('oppAvatar', d.opponentAvatar || '👤');
+      setText('myMatchupName', d.myName || 'Me');
+      setText('oppMatchupName', d.opponentName || 'Opponent');
+      setText('myTierBadge', isRanked ? `MMR ${d.myRating ?? '-'}` : `🏆 ${d.myTrophies || 0}`);
+      setText('oppTierBadge', isRanked ? `MMR ${d.opponentRating ?? '-'}` : `🏆 ${d.opponentTrophies || 0}`);
+      renderRankBadge('myRankBadge', d.myRank);
+      renderRankBadge('oppRankBadge', d.opponentRank);
+      removeCls('matchupBar', 'hidden-state');
     }
 
-    socket.on('gameStart', (data) => {
-      const wasPracticing = isSoloPractice;
-      resetGameState();
-      isSoloPractice = false;
-      practiceChunksTyped = 0;
-      document.getElementById('timer').parentElement.style.display = '';
-      const enterBtn = document.getElementById('enterPracticeBtn');
-      if (enterBtn) { enterBtn.disabled = false; enterBtn.innerText = '🎯 Enter Solo Practice'; }
+    sub('gameStart', (data) => {
+      if (!data) return;
+      const wasPracticing = practice.active;
+      resetGameState();   // 연습 중이었다면 여기서 함께 종료된다
+
       currentMode = data.mode;
+      currentDuration = data.duration;
       sampleText = data.text;
       duration = data.duration;
       serverStartTime = data.startTime;
-      document.getElementById('modeSelect').style.display = 'none';
-      document.getElementById('waitingControls').style.display = 'none';
-      document.getElementById('gameArea').style.display = 'block';
+      isRanked = !!data.isRanked;
+
+      const timerEl = el('timer');
+      if (timerEl && timerEl.parentElement) timerEl.parentElement.style.display = '';
+
+      setDisplay('modeSelect', 'none');
+      hideQueueControls();
+      setDisplay('roomWaiting', 'none');
+      setDisplay('gameArea', 'block');
+      removeCls('roomCodeModal', 'show');
       setLobbyVisible(false);
-      document.getElementById('modeBadge').innerText = `${data.isRanked ? '[Ranked] ' : '[Casual] '}${duration}s`;
-      document.getElementById('statusMessage').innerText = wasPracticing ? "Opponent found! Practice ended — match starting!" : "Opponent found!";
-      document.getElementById('resultBanner').innerHTML = '';
-      document.getElementById('restartRow').style.display = 'none';
-      if (data.myTier && data.opponentTier) renderMatchupBar(data);
+
+      setText('modeBadge', `${data.isRanked ? '[Ranked] ' : '[Casual] '}${duration}s`);
+      setStatus(wasPracticing ? 'Opponent found! Practice ended — match starting!' : 'Opponent found!');
+      setHTML('resultBanner', '');
+      setClassName('resultBanner', 'result-banner');
+      setDisplay('restartRow', 'none');
+      setText('accuracy', 100);
+
+      renderMatchupBar(data);
       renderQuote();
       startCountdown();
     });
 
-    socket.on('opponentProgress', (data) => {
-      if (oppCaretEl) positionCaret(oppCaretEl, data.charIndex || 0);
+    sub('opponentProgress', (data) => {
+      if (oppCaretEl) positionCaret(oppCaretEl, (data && data.charIndex) || 0);
     });
 
-    // 방 생성 시 초대 링크를 URL에 반영 (?room=CODE) + 메인 대기실 Copy Invite Link 버튼 표시
-    socket.on('roomCreated', (data) => {
-      privateRoomCode = data.code;
-      history.replaceState(null, '', '?room=' + data.code);
-      document.getElementById('roomCodeDisplay').innerText = data.code;
-      document.getElementById('roomCodeModal').classList.add('show');
-      document.getElementById('roomWaitingCode').innerText = data.code;
-      document.getElementById('roomWaiting').style.display = 'block';
-      document.getElementById('copyInviteLinkBtn').style.display = 'inline-block';
-      document.getElementById('modeSelect').style.display = 'none';
-      document.getElementById('typeTab').style.display = 'none';
-      setLobbyVisible(false);
-      document.getElementById('title').innerText = 'Waiting in room...';
-      document.getElementById('statusMessage').innerText = '';
-    });
+    /* ---------- 14) 재경기 ---------- */
+    function clearRematchState() {
+      clearInterval(rematchCountdownInterval);
+      rematchCountdownInterval = null;
+      rematchDeadline = null;
+      rematchRoomId = null;
+      rematchRequestedByMe = false;
 
-    socket.on('roomJoined', (data) => {
-      privateRoomCode = data.code;
-      document.getElementById('title').innerText = 'Opponent joining soon...';
-      document.getElementById('statusMessage').innerText = '';
-    });
-
-    socket.on('roomOpponentJoined', () => {
-      document.getElementById('statusMessage').innerText = 'Opponent joined the room!';
-    });
-
-    socket.on('customRoomCountdown', (data) => {
-      closeRoomModal();
-      document.getElementById('roomWaiting').style.display = 'none';
-      document.getElementById('statusMessage').innerText = '';
-      let sec = data.seconds;
-      document.getElementById('title').innerText = `Starting in ${sec}...`;
-      document.getElementById('gameArea').style.display = 'block';
-      document.getElementById('modeSelect').style.display = 'none';
-      document.getElementById('typeTab').style.display = 'none';
-      const cd = setInterval(() => { sec--; if (sec <= 0) clearInterval(cd); else document.getElementById('title').innerText = `Starting in ${sec}...`; }, 1000);
-    });
-
-    socket.on('roomError', (data) => {
-      document.getElementById('statusMessage').innerText = '⚠️ ' + (data.message || 'Room error');
-      document.getElementById('waitingControls').style.display = 'none';
-      document.getElementById('modeSelect').style.display = 'flex';
-      document.getElementById('typeTab').style.display = 'flex';
-      setLobbyVisible(true);
-      document.getElementById('title').innerText = 'Select Match Duration';
-      document.getElementById('roomWaiting').style.display = 'none';
-      privateRoomCode = null;
-    });
-
-    function renderCompareCard(label, colClass, stats) {
-      return `<div class="dash-col ${colClass}"><h4>${label}</h4><div class="dash-stat-row"><span class="k">Net Chars</span><span class="v">${stats.netCorrect}</span></div><div class="dash-stat-row"><span class="k">Accuracy</span><span class="v">${stats.accuracy}%</span></div></div>`;
+      setDisplay('rematchStatus', 'none');
+      setHTML('rematchActionRow', '');
+      const btn = el('rematchBtn');
+      if (btn) { btn.disabled = false; btn.innerText = '🔁 Rematch'; btn.style.display = ''; }
     }
 
-    socket.on('sessionReplaced', () => {
-      gameEnded = true;
-      document.getElementById('typingInput').disabled = true;
-      document.getElementById('gameArea').style.display = 'none';
-      document.getElementById('roomCodeModal').classList.remove('show');
-      document.getElementById('reportModalOverlay').classList.remove('show');
-      document.getElementById('title').innerText = 'Session replaced';
-      document.getElementById('statusMessage').innerText = '⚠️ Other session connected — this tab has been disconnected.';
-      alert('Other session connected.\nThis tab has been disconnected because the same account is now active elsewhere.');
+    function startRematchCountdownUI() {
+      rematchDeadline = Date.now() + 10000;
+      setDisplay('rematchStatus', 'block');
+      clearInterval(rematchCountdownInterval);
+      rematchCountdownInterval = setInterval(() => {
+        const remaining = Math.max(0, Math.ceil((rematchDeadline - Date.now()) / 1000));
+        const base = rematchRequestedByMe ? 'Waiting for opponent to accept' : 'Opponent wants a rematch';
+        setText('rematchStatusText', `${base}... (${remaining}s)`);
+        if (remaining <= 0) clearInterval(rematchCountdownInterval);
+      }, 250);
+    }
+
+    function requestRematch() {
+      if (!lastRoomId) return;
+      rematchRoomId = lastRoomId;
+      rematchRequestedByMe = true;
+      emit('requestRematch', { roomId: lastRoomId });
+      const btn = el('rematchBtn');
+      if (btn) btn.style.display = 'none';
+      setHTML('rematchActionRow',
+        `<button class="btn-restart btn-secondary" onclick="cancelRematchRequest()">✕ Cancel</button>`);
+      startRematchCountdownUI();
+    }
+
+    function cancelRematchRequest() {
+      if (rematchRoomId) emit('declineRematch', { roomId: rematchRoomId });
+      clearRematchState();
+      setPostMatchButtons();
+    }
+
+    function acceptRematch() {
+      if (!rematchRoomId) return;
+      emit('requestRematch', { roomId: rematchRoomId });
+      setHTML('rematchActionRow', '');
+      setText('rematchStatusText', 'Accepting...');
+    }
+
+    function declineRematchPrompt() {
+      if (rematchRoomId) emit('declineRematch', { roomId: rematchRoomId });
+      clearRematchState();
+      setPostMatchButtons();
+    }
+
+    sub('rematchRequested', (data) => {
+      if (!data || !lastRoomId || data.roomId !== lastRoomId) return;
+      rematchRoomId = data.roomId;
+      rematchRequestedByMe = false;
+      const btn = el('rematchBtn');
+      if (btn) btn.style.display = 'none';
+      setHTML('rematchActionRow',
+        `<button class="btn-restart" onclick="acceptRematch()">✅ Accept</button>
+         <button class="btn-restart btn-secondary" onclick="declineRematchPrompt()">✕ Decline</button>`);
+      startRematchCountdownUI();
     });
 
-    socket.on('gameOver', (data) => {
+    sub('rematchTimeout', () => {
+      setStatus('⌛ Rematch request timed out.');
+      clearRematchState();
+      setPostMatchButtons();
+    });
+
+    sub('rematchDeclined', () => {
+      setStatus('🚫 Opponent declined the rematch.');
+      clearRematchState();
+      setPostMatchButtons();
+    });
+
+    sub('rematchError', (data) => {
+      setStatus('⚠️ ' + ((data && data.message) || 'Rematch unavailable.'));
+      clearRematchState();
+      setPostMatchButtons();
+    });
+
+    /* ---------- 15) 신고 ---------- */
+    function openReportModal() {
+      selectedReportReason = null;
+      document.querySelectorAll('.report-option').forEach((o) => o.classList.remove('selected'));
+      document.querySelectorAll('input[name="reportReason"]').forEach((r) => { r.checked = false; });
+      const submitBtn = document.querySelector('.report-modal-box .btn-save');
+      if (submitBtn) { submitBtn.disabled = false; submitBtn.innerText = 'Submit Report'; }
+      addCls('reportModalOverlay', 'show');
+    }
+
+    function closeReportModal() { removeCls('reportModalOverlay', 'show'); }
+
+    function selectReportReason(reason, elm) {
+      selectedReportReason = reason;
+      document.querySelectorAll('.report-option').forEach((o) => o.classList.remove('selected'));
+      if (elm && elm.closest('.report-option')) elm.closest('.report-option').classList.add('selected');
+    }
+
+    function submitReport() {
+      if (!selectedReportReason) { setStatus('⚠️ Please select a reason.'); return; }
+      if (!lastOpponentId || !lastRoomId) { setStatus('⚠️ No opponent data available.'); closeReportModal(); return; }
+      if (reportedMatchIds.has(lastRoomId)) { setStatus('⚠️ You already reported in this match.'); closeReportModal(); return; }
+      const submitBtn = document.querySelector('.report-modal-box .btn-save');
+      if (submitBtn) { submitBtn.disabled = true; submitBtn.innerText = 'Submitting...'; }
+      emit('report_player', {
+        targetPlayerId: lastOpponentId,
+        roomId: lastRoomId,
+        reason: selectedReportReason,
+        matchStats: lastMatchStats || {}
+      });
+      reportedMatchIds.add(lastRoomId);
+    }
+
+    sub('reportResult', (data) => {
+      closeReportModal();
+      const submitBtn = document.querySelector('.report-modal-box .btn-save');
+      if (submitBtn) { submitBtn.disabled = false; submitBtn.innerText = 'Submit Report'; }
+      if (data && data.success) {
+        setStatus('✅ Report submitted. Thank you!');
+        const reportBtn = el('reportBtn');
+        if (reportBtn) { reportBtn.disabled = true; reportBtn.innerText = 'Reported'; }
+      } else {
+        setStatus('⚠️ ' + ((data && data.message) || 'Report failed.'));
+      }
+    });
+
+    on('reportModalOverlay', 'click', (e) => {
+      if (e.target && e.target.id === 'reportModalOverlay') closeReportModal();
+    });
+
+    /* ---------- 16) 게임 종료 ---------- */
+    function renderCompareCard(label, colClass, stats) {
+      const s = stats || { netCorrect: 0, accuracy: 0 };
+      return `<div class="dash-col ${colClass}">`
+        + `<h4>${label}</h4>`
+        + `<div class="dash-stat-row"><span class="k">Net Chars</span><span class="v">${s.netCorrect}</span></div>`
+        + `<div class="dash-stat-row"><span class="k">Accuracy</span><span class="v">${s.accuracy}%</span></div>`
+        + `</div>`;
+    }
+
+    sub('gameOver', (data) => {
+      if (!data) return;
       gameEnded = true;
+      clearInterval(countdownInterval);
       clearInterval(gameTimerInterval);
-      document.getElementById('typingInput').disabled = true;
-      lastOpponentId = data.opponentId || null;
-      lastRoomId = data.roomId || null;
-      lastMatchStats = { myStats: data.myStats, opponentStats: data.opponentStats, result: data.result, duration: duration };
+      clearRematchState();
 
-      const tagClass = data.result === 'win' ? 'win' : data.result === 'lose' ? 'lose' : 'draw';
-      const tagText = data.result === 'win' ? '🏆 WIN' : data.result === 'lose' ? '😢 LOSE' : '🤝 DRAW';
+      if (data.opponentId) lastOpponentId = data.opponentId;
+      if (data.roomId) lastRoomId = data.roomId;
+      if (data.myStats) lastMatchStats = data.myStats;
 
-      let changeHtml = '';
-      if (data.ratingData) {
-        myRating = data.ratingData.new;
-        const diff = data.ratingData.diff;
-        changeHtml = `<div class="rating-change">MMR Change: ${diff >= 0 ? '+' : ''}${diff} (${data.ratingData.new})</div>`;
-      }
-      if (data.trophyData) {
-        myTrophies = data.trophyData.new;
-        if (!data.ratingData) {
-          const diff = data.trophyData.diff;
-          changeHtml = `<div class="rating-change" style="color:var(--mt-yellow);">🏆 Trophy Change: ${diff >= 0 ? '+' : ''}${diff} (${data.trophyData.new})</div>`;
-        }
-      }
       updateTopBar();
-      applyUnlockStatus(data.unlock, { justUnlocked: !!data.justUnlocked, keepPanel: true });
+      applyUnlockStatus(data.unlock, { justUnlocked: !!data.justUnlocked, unlockedNow: !!data.unlockedNow });
 
-      const matchKey = lastRoomId || '';
-      const alreadyReported = reportedMatchIds.has(matchKey);
-      const oppName = data.opponentName || 'Opponent';
-      const reportBtnHtml = isBotMatch ? '' : `<button class="btn-report" id="reportBtn" onclick="openReportModal()" ${alreadyReported ? 'disabled' : ''}>${alreadyReported ? 'Reported' : '⚠ Report'}</button>`;
-
-      let invalidatedNote = '';
-      if (data.invalidated) {
-        invalidatedNote = `<div class="rating-change" style="color:#888;">⚖️ Practice match — rewards not counted (same account detected)</div>`;
+      const myStats = data.myStats || {};
+      const tagClass = data.result === 'win' ? 'win' : (data.result === 'lose' ? 'lose' : 'draw');
+      let tagText = data.result === 'win' ? '🏆 WIN' : (data.result === 'lose' ? '💀 LOSE' : '🤝 DRAW');
+      if (data.reason === 'forfeit') {
+        tagText = data.result === 'lose' ? '💀 LOSE (Forfeited)' : '🏆 WIN (Opponent Forfeited)';
+      } else if (data.reason === 'cheat_detected') {
+        tagText = data.disqualified ? '🚫 DISQUALIFIED (Cheat Detected)' : '🏆 WIN (Opponent Disqualified)';
       }
-      document.getElementById('resultBanner').innerHTML = `
+
+      const changeHtml = data.ratingData
+        ? `<div class="rating-change">${data.ratingData.diff >= 0 ? '+' : ''}${data.ratingData.diff} MMR (${data.ratingData.old} → ${data.ratingData.new})</div>`
+        : (data.trophyData
+            ? `<div class="rating-change">${data.trophyData.diff >= 0 ? '+' : ''}${data.trophyData.diff} 🏆 Trophies</div>`
+            : '');
+
+      const alreadyReported = reportedMatchIds.has(lastRoomId || '');
+      const oppName = data.opponentName || 'Opponent';
+      const reportBtnHtml = `<button class="btn-report" id="reportBtn" onclick="openReportModal()" ${alreadyReported ? 'disabled' : ''}>${alreadyReported ? 'Reported' : '⚠ Report'}</button>`;
+      const invalidatedNote = data.invalidated
+        ? `<div class="rating-change" style="color:#888;">⚖️ Practice match — rewards not counted (same account detected)</div>`
+        : '';
+
+      setHTML('resultBanner', `
         <div class="dash-result-tag ${tagClass}">${tagText}</div>
         ${invalidatedNote}
         <div class="opp-name-row">
@@ -1047,7 +1548,7 @@
         ${changeHtml}
         <div class="dash-main">
           <div class="dash-primary">
-            <div class="dash-value">${data.myStats.netCorrect}</div>
+            <div class="dash-value">${myStats.netCorrect || 0}</div>
             <div class="dash-label">Final Score (Net Chars)</div>
           </div>
         </div>
@@ -1055,100 +1556,57 @@
           ${renderCompareCard('You', 'me', data.myStats)}
           ${renderCompareCard('Opponent', 'opp', data.opponentStats)}
         </div>
-      `;
-      document.getElementById('resultBanner').className = 'result-banner dashboard show';
-      document.getElementById('restartRow').style.display = 'block';
+      `);
+      setClassName('resultBanner', 'result-banner dashboard show');
+
       setLobbyVisible(true);
+      setPostMatchButtons();
     });
 
-    socket.on('soloPracticeStart', (data) => {
-      isSoloPractice = true;
-      practiceChunksTyped = 0;
-      sampleText = data.text;
-      duration = 0; // 0 = 시간 제한 없음 (Endless)
-      gameEnded = false;
-      serverStartTime = Date.now();
-      totalTyped = 0;
-      totalErrors = 0;
-      prevVal = "";
-      document.getElementById('enterPracticeBtn').disabled = true;
-      document.getElementById('enterPracticeBtn').innerText = '🎯 Practicing... (match continues in background)';
-
-      document.getElementById('modeSelect').style.display = 'none';
-      document.getElementById('waitingControls').style.display = 'none';
-      document.getElementById('gameArea').style.display = 'block';
-      setLobbyVisible(false);
-      document.getElementById('modeBadge').innerText = '[Solo Practice — No Time Limit]';
-      document.getElementById('statusMessage').innerText = '';
-      document.getElementById('title').innerText = 'Solo Practice — type as long as you want';
-      document.getElementById('resultBanner').innerHTML = '';
-      document.getElementById('resultBanner').className = 'result-banner';
-      document.getElementById('restartRow').style.display = 'none';
-      document.getElementById('matchupBar').classList.add('hidden-state');
-      renderQuote();
-      if (oppCaretEl) oppCaretEl.style.display = 'none'; // 연습 모드에서는 상대 커서 없음
-      document.getElementById('typingInput').disabled = false;
-      document.getElementById('typingInput').focus();
-      document.getElementById('timer').parentElement.style.display = 'none';
-      document.getElementById('practiceExitRow').style.display = 'block';
-    });
-
-    // 연습 텍스트 청크 소진 시 서버에 다음 청크 요청 (Endless)
-    function requestMorePracticeText() {
-      socket.emit('requestPracticeText');
-    }
-
-    // [Enter Solo Practice] — 매칭 대기를 유지한 채 시간 제한 없는 연습 화면으로 즉시 진입
-    function enterSoloPractice() {
-      if (isSoloPractice) return;
-      socket.emit('requestSoloPractice');
-    }
-
-    // Exit Practice — 연습 종료 후 대기 화면으로 복귀 (매칭은 백그라운드에서 계속 진행됨)
-    function exitPractice() {
-      socket.emit('exitPractice');
-      isSoloPractice = false;
-      practiceChunksTyped = 0;
+    sub('opponentLeft', () => {
       gameEnded = true;
-      document.getElementById('typingInput').disabled = true;
-      document.getElementById('gameArea').style.display = 'none';
-      document.getElementById('practiceExitRow').style.display = 'none';
-      resetGameState();
-      document.getElementById('resultBanner').innerHTML = '';
-      document.getElementById('resultBanner').className = 'result-banner';
-      document.getElementById('restartRow').style.display = 'none';
-      document.getElementById('waitingControls').style.display = 'block';
-      setLobbyVisible(false);
-      document.getElementById('title').innerText = 'Finding opponent...';
-      document.getElementById('statusMessage').innerText = 'Still searching for an opponent in background...';
-    }
-
-    socket.on('practiceText', (data) => {
-      if (!isSoloPractice) return;
-      practiceChunksTyped += sampleText.length;
-      sampleText = data.text;
-      renderQuote();
-      document.getElementById('typingInput').disabled = false;
-      document.getElementById('typingInput').focus();
-    });
-
-    // 연습 종료 시 [Enter Solo Practice] 버튼 상태 복원
-    socket.on('practiceEnded', () => {
-      isSoloPractice = false;
-      practiceChunksTyped = 0;
-      const btn = document.getElementById('enterPracticeBtn');
-      if (btn) { btn.disabled = false; btn.innerText = '🎯 Enter Solo Practice'; }
-    });
-
-    socket.on('opponentLeft', (data) => {
-      gameEnded = true;
-      document.getElementById('typingInput').disabled = true;
-      document.getElementById('resultBanner').innerHTML = `<div class="dash-result-tag win">🏆 WIN (Opponent left)</div>`;
-      document.getElementById('resultBanner').className = 'result-banner dashboard show';
-      document.getElementById('restartRow').style.display = 'block';
+      clearInterval(countdownInterval);
+      clearInterval(gameTimerInterval);
+      clearRematchState();
+      const ti = el('typingInput');
+      if (ti) ti.disabled = true;
+      hideQueueControls();
+      setDisplay('leaveMatchRow', 'none');
+      setHTML('resultBanner', `<div class="dash-result-tag win">🏆 WIN (Opponent left)</div>`);
+      setClassName('resultBanner', 'result-banner dashboard show');
       setLobbyVisible(true);
-      if (data) applyUnlockStatus(data.unlock, { justUnlocked: !!data.justUnlocked, keepPanel: true });
+      setPostMatchButtons();
     });
+
+    /* ---------- 17) inline onclick용 전역 노출 (스코프 이슈 방지) ---------- */
+    window.switchView = switchView;
+    window.switchMatchKind = switchMatchKind;
+    window.selectMode = selectMode;
+    window.startPracticeMode = startPracticeMode;
+    window.findNextMatch = findNextMatch;
+    window.cancelSearch = cancelSearch;
+    window.leaveCurrentMatch = leaveCurrentMatch;
+    window.startPrivateRoom = startPrivateRoom;
+    window.joinPrivateRoom = joinPrivateRoom;
+    window.cancelPrivateRoom = cancelPrivateRoom;
+    window.copyInviteLink = copyInviteLink;
+    window.copyInviteLinkToClipboard = copyInviteLinkToClipboard;
+    window.closeRoomModal = closeRoomModal;
+    window.enterSoloPractice = enterSoloPractice;
+    window.exitPractice = exitPractice;
+    window.requestRematch = requestRematch;
+    window.cancelRematchRequest = cancelRematchRequest;
+    window.acceptRematch = acceptRematch;
+    window.declineRematchPrompt = declineRematchPrompt;
+    window.openReportModal = openReportModal;
+    window.closeReportModal = closeReportModal;
+    window.selectReportReason = selectReportReason;
+    window.submitReport = submitReport;
+
+    /* ---------- 18) 초기화 ---------- */
+    updateTopBar();
+    hideQueueControls();
+    initTypingInput();
   </script>
 </body>
 </html>
