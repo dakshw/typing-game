@@ -457,16 +457,71 @@
 
     const LINE_HEIGHT = 38;
 
-    // Practice Mode 전용 샘플 문장 — 서버 왕복 없이 클라이언트에서 바로 선택한다.
-    const PRACTICE_TEXTS = [
-      "the quick brown fox jumps over the lazy dog while the sun sets over the quiet hills",
-      "practice makes perfect and every keystroke brings you closer to mastering your speed",
-      "type steadily and focus on accuracy before you start chasing a higher words per minute score",
-      "a good typist knows that rhythm matters more than raw speed when accuracy is on the line",
-      "consistency beats intensity when you are building a new habit one small step at a time",
-      "keep your eyes on the words ahead and let your fingers follow without looking down",
-      "small daily practice sessions add up to real improvement over the course of a few weeks"
+    // 실전 모드(서버)와 완전히 동일한 텍스트 생성 로직을 클라이언트에 그대로 이식했다.
+    // 연습모드는 서버 왕복 없이 동작해야 하므로(서버의 generateUniqueText 등을 직접 호출할 수 없음),
+    // 서버(server.js)의 timeModeWordPool / isEasyTransition / pickNextWord / generateRandomText /
+    // timeModeWordCount 로직을 1:1로 복제해, 실전 모드와 같은 단어 풀·같은 조합 규칙으로
+    // 3~4줄을 훌쩍 넘는 넉넉한 분량의 문단을 만든다. 렌더링(renderQuote, 줄바꿈, 폰트, 스크롤)은
+    // 실전 모드와 100% 동일한 코드 경로(showPracticeText → renderQuote)를 그대로 공유한다.
+    const timeModeWordPool = [
+      "the", "be", "to", "of", "and", "a", "in", "that", "have", "it",
+      "for", "not", "on", "with", "he", "as", "you", "do", "at", "this",
+      "but", "his", "by", "from", "they", "we", "say", "her", "she", "or",
+      "an", "will", "my", "one", "all", "would", "there", "their", "what", "so",
+      "up", "out", "if", "about", "who", "get", "which", "go", "me", "when",
+      "make", "can", "like", "time", "no", "just", "him", "know", "take", "people",
+      "into", "year", "your", "good", "some", "could", "them", "see", "other", "than",
+      "then", "now", "look", "only", "come", "its", "over", "think", "also", "back",
+      "after", "use", "two", "how", "our", "work", "first", "well", "way", "even",
+      "new", "want", "because", "any", "these", "give", "day", "most", "us", "code",
+      "program", "system", "run", "fast", "type", "keyboard", "match", "win", "play", "speed"
     ];
+
+    // 서버의 isEasyTransition과 동일: 너무 쉬운 단어 전환(같은 단어 반복, 짧은 단어끼리 연속,
+    // 앞 단어 끝글자 = 뒷 단어 첫글자)을 피해서 실제 매치와 같은 난이도 체감을 유지한다.
+    function isEasyTransition(prevWord, nextWord) {
+      if (!prevWord) return false;
+      if (prevWord === nextWord) return true;
+      if (prevWord.length <= 3 && nextWord.length <= 3) return true;
+      if (prevWord[prevWord.length - 1] === nextWord[0]) return true;
+      return false;
+    }
+
+    function pickNextWord(pool, prevWord) {
+      const candidates = pool.filter(w => !isEasyTransition(prevWord, w));
+      const source = candidates.length > 0 ? candidates : pool;
+      return source[Math.floor(Math.random() * source.length)];
+    }
+
+    function generateRandomText(targetWordCount) {
+      const words = [];
+      let prevWord = null;
+      for (let i = 0; i < targetWordCount; i++) {
+        const word = pickNextWord(timeModeWordPool, prevWord);
+        words.push(word);
+        prevWord = word;
+      }
+      return words.join(' ');
+    }
+
+    // 서버의 timeModeWordCount와 동일한 공식. 60초 실전 매치와 같은 분량(360단어)을 기본값으로
+    // 사용해, 연습모드도 실전 모드와 "같은 텍스트 길이"로 느껴지도록 맞춘다.
+    function timeModeWordCount(duration) {
+      return Math.max(200, Math.ceil(duration * 6));
+    }
+    const PRACTICE_WORD_COUNT = timeModeWordCount(60);
+
+    // 서버의 generateUniqueText와 동일: 직전 문단과 완전히 같은 문단이 연속으로 나오지 않도록
+    // 최대 10회까지 재시도한다.
+    function generatePracticeText(previousText) {
+      let text = generateRandomText(PRACTICE_WORD_COUNT);
+      let attempts = 0;
+      while (text === previousText && attempts < 10) {
+        text = generateRandomText(PRACTICE_WORD_COUNT);
+        attempts++;
+      }
+      return text;
+    }
 
     /* ---------- 3) 전역 상태 ---------- */
     let isRanked = false;
@@ -493,10 +548,6 @@
     let myCaretEl = null;
     let oppCaretEl = null;
 
-    // 게임 종료 시 서버로 최종 기록을 정확히 "한 번만" 전송하기 위한 가드.
-    // (완료로 끝나든, 타임아웃으로 끝나든 반드시 한 번은 전송되어야 함)
-    let finalStatsSent = false;
-
     let isCreatingPrivateRoom = false;
     let privateRoomCode = null;
     let isPrivateRoomMatch = false;   // 커스텀룸(친선) 경기 여부
@@ -505,8 +556,7 @@
     // Practice Mode 상태 — 매치와 동일한 입력 로직을 그대로 공유하며, 시간 제한만 없다.
     const practice = {
       active: false,
-      origin: null,          // 'menu' | 'queue' — 종료 시 돌아갈 화면만 결정한다
-      lastTextIdx: -1        // 같은 문장이 연속으로 나오지 않게 하기 위한 인덱스
+      origin: null           // 'menu' | 'queue' — 종료 시 돌아갈 화면만 결정한다
     };
 
     let lastOpponentId = null;
@@ -768,7 +818,6 @@
       clearRematchState();
       teardownPractice();
       gameEnded = false;
-      finalStatsSent = false;
 
       lastKeystrokeTime = null;
       pendingDeltas = [];
@@ -1082,11 +1131,9 @@
           clearInterval(gameTimerInterval);
           const ti = el('typingInput');
           if (ti) ti.disabled = true;
-          // ★ 버그 수정: 시간 만료로 매치가 끝날 때도 서버에 최종 기록을 반드시 전송해야
-          //   서버가 netCorrect/accuracy를 계산해 승패를 정확히 판정할 수 있다.
-          //   (이전에는 문장을 끝까지 다 친 경우에만 emit되어, 시간 초과로 끝나는
-          //    대부분의 매치에서 두 플레이어 모두 0점으로 처리되어 강제 무승부가 발생했다.)
-          sendFinalStats('timeout');
+          // 타임아웃 시 서버로 별도 emit이 필요 없다: 서버는 startMatch()에서 자신만의
+          // setTimeout으로 동일한 시점에 endGame()을 호출하며, 그때 쓰이는 netCorrect는
+          // 이미 이 대전 내내 보낸 'progress' emit들을 통해 서버에 누적 반영되어 있다.
         }
       }, 200);
     }
@@ -1102,16 +1149,7 @@
        측정 지표는 Accuracy 하나뿐이다 (WPM 없음).
        ========================================================= */
 
-    function pickPracticeText() {
-      let idx;
-      do {
-        idx = Math.floor(Math.random() * PRACTICE_TEXTS.length);
-      } while (PRACTICE_TEXTS.length > 1 && idx === practice.lastTextIdx);
-      practice.lastTextIdx = idx;
-      return PRACTICE_TEXTS[idx];
-    }
-
-    // 현재 문장을 화면에 그리고 입력창을 비운다 (최초 진입 / 다음 문장 전환 공용)
+    // 현재 문장을 화면에 그리고 입력창을 비운다 (최초 진입 / 다음 문단 전환 공용)
     function showPracticeText(text) {
       sampleText = text;
       prevVal = '';
@@ -1155,8 +1193,7 @@
       resetGameState();               // 매치/카운트다운/재경기 잔여 상태 정리 (연습 상태 포함)
       practice.active = true;
       practice.origin = origin;
-      practice.lastTextIdx = -1;
-      renderPracticeScreen(pickPracticeText());
+      renderPracticeScreen(generatePracticeText(''));
     }
 
     function startPracticeMode() {
@@ -1235,24 +1272,6 @@
       setText('accuracy', computeAccuracy());
     }
 
-    // ★ 신규: 매치 종료(완료 또는 타임아웃) 시 서버로 최종 기록을 보내는 단일 진입점.
-    //   - 정확히 한 번만 전송되도록 finalStatsSent 플래그로 가드한다.
-    //   - 연습 모드에서는 애초에 상대가 없으므로 아무것도 보내지 않는다.
-    //   - netCorrect/accuracy를 클라이언트에서도 함께 계산해 실어 보내
-    //     서버 쪽 계산 로직과 어긋나더라도 최소한의 정보가 항상 도착하도록 한다.
-    function sendFinalStats(reason) {
-      if (practice.active) return;
-      if (finalStatsSent) return;
-      finalStatsSent = true;
-      emit('finishedTyping', {
-        totalTyped,
-        totalErrors,
-        netCorrect: Math.max(0, totalTyped - totalErrors),
-        accuracy: computeAccuracy(),
-        reason: reason || 'completed'
-      });
-    }
-
     function onTypingInput(e) {
       if (gameEnded) return;
       const ti = el('typingInput');
@@ -1274,8 +1293,13 @@
       updateAccuracyDisplay();
 
       if (!practice.active) {
-        // 매치 중일 때만 서버로 실시간 진행도 전송 (상대방 캐럿 표시 + 실시간 정확도용)
-        emit('typingProgress', {
+        // ★ 버그의 실제 원인: 서버는 socket.on('progress', ...) 로 받고 있는데
+        //   클라이언트는 'typingProgress'라는 다른 이름으로 emit하고 있었다.
+        //   이벤트 이름이 어긋나 서버가 진행도를 전혀 받지 못했고, 그 결과
+        //   (1) 서버가 상대방에게 'opponentProgress'를 보낼 계기가 없어 커서가 안 보이고
+        //   (2) 서버의 player.netCorrect가 항상 0으로 남아 게임 종료 시 무조건 무승부가 났다.
+        //   서버가 기대하는 정확한 이벤트명 'progress'로 수정.
+        emit('progress', {
           charIndex: value.length,
           totalTyped,
           totalErrors,
@@ -1286,13 +1310,18 @@
 
       if (value.length >= sampleText.length) {
         if (practice.active) {
-          // 연습은 시간 제한이 없으므로 다음 문장으로 계속 이어간다
-          showPracticeText(pickPracticeText());
+          // 연습은 시간 제한이 없으므로, 실전 모드와 동일한 방식으로 생성한
+          // 새 문단을 이어서 계속 진행한다 (짧은 문장 목록을 순환하던 이전 방식 대체)
+          showPracticeText(generatePracticeText(sampleText));
         } else {
-          // 매치는 문장을 다 치면 입력을 잠그고 서버에 완료를 알린다
+          // ★ 서버에는 'finishedTyping' 같은 별도의 "완료" 이벤트 리스너가 존재하지 않는다.
+          //   서버는 오직 'progress' 이벤트의 charIndex가 텍스트 길이에 도달(=100%)했는지로
+          //   완료를 자체 판정하고, 그 즉시 endGame()을 호출해 승패를 정산한다.
+          //   따라서 클라이언트는 별도의 완료 신호를 보낼 필요가 없고, 위에서 보낸
+          //   마지막 'progress' emit 하나로 서버가 이미 100% 완료 처리를 하게 된다.
+          //   여기서는 로컬 UX(입력 잠금 + 안내 문구)만 처리한다.
           ti.disabled = true;
           setStatus('✅ Finished! Waiting for time to run out or your opponent to finish...');
-          sendFinalStats('completed');
         }
       }
     }
@@ -1357,7 +1386,7 @@
     sub('gameStart', (data) => {
       if (!data) return;
       const wasPracticing = practice.active;
-      resetGameState();   // 연습 중이었다면 여기서 함께 종료된다 (finalStatsSent도 초기화됨)
+      resetGameState();   // 연습 중이었다면 여기서 함께 종료된다
 
       currentMode = data.mode;
       currentDuration = data.duration;
