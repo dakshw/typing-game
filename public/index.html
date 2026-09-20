@@ -556,7 +556,11 @@
 let serverClockOffset = 0;
 
 function syncServerClock(serverNow) {
-  if (Number.isFinite(serverNow)) serverClockOffset = serverNow - Date.now();
+  if (!Number.isFinite(serverNow)) return;
+  const offset = serverNow - Date.now();
+  // 단위 오류 등 비정상적으로 큰 값은 무시하고 로컬 시계로 폴백 (5분 초과)
+  serverClockOffset = Math.abs(offset) < 5 * 60 * 1000 ? offset : 0;
+  console.log('[sync] serverClockOffset(ms):', serverClockOffset);
 }
 
 // 서버 기준 "지금" 시각
@@ -1116,8 +1120,15 @@ function syncedNow() {
 function runCountdown(onZero) {
   hideQueueControls();
   clearInterval(countdownInterval);
-  let lastShown = null;
 
+  // startTime이 없거나 숫자가 아니면 카운트다운이 영원히 안 끝나므로 3초 뒤로 대체
+  if (!Number.isFinite(serverStartTime)) {
+    console.warn('[countdown] invalid serverStartTime:', serverStartTime);
+    serverStartTime = syncedNow() + 3000;
+  }
+  console.log('[countdown] remaining(ms):', serverStartTime - syncedNow());
+
+  let lastShown = null;
   const tick = () => {
     const remainingMs = serverStartTime - syncedNow();
     if (remainingMs <= 0) {
@@ -1136,7 +1147,6 @@ function runCountdown(onZero) {
   tick();
   countdownInterval = setInterval(tick, 50);
 }
-
 function startCountdown() {
     runCountdown(() => {
         const ti = el('typingInput');
