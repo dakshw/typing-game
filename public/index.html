@@ -552,7 +552,17 @@
     let privateRoomCode = null;
     let isPrivateRoomMatch = false;   // 커스텀룸(친선) 경기 여부
     let isQueueWaiting = false;       // 서버 매칭 대기열에 들어가 있는 상태
+    // 서버-클라이언트 시계 차이 보정값 (serverNow - clientNow)
+let serverClockOffset = 0;
 
+function syncServerClock(serverNow) {
+  if (Number.isFinite(serverNow)) serverClockOffset = serverNow - Date.now();
+}
+
+// 서버 기준 "지금" 시각
+function syncedNow() {
+  return Date.now() + serverClockOffset;
+}
     // Practice Mode 상태 — 매치와 동일한 입력 로직을 그대로 공유하며, 시간 제한만 없다.
     const practice = {
       active: false,
@@ -910,12 +920,11 @@
       hideQueueControls();
       setTitle('Opponent found!');
     });
-    sub('countdown', (data) => {
-      abortPracticeForMatch();
-      hideQueueControls();
-      const sec = data && Number.isFinite(data.seconds) ? data.seconds : null;
-      if (sec !== null) setTitle(`Starting in ${sec}...`);
-    });
+    sub('countdown', () => {
+  abortPracticeForMatch();
+  hideQueueControls();
+  setTitle('Opponent found!');
+});
 
     /* ---------- 10) 커스텀 룸 ---------- */
     function startPrivateRoom() {
@@ -1030,21 +1039,21 @@
     sub('roomOpponentJoined', () => { setStatus('Opponent joined the room!'); });
 
     sub('customRoomCountdown', (data) => {
-      closeRoomModal();
-      hideQueueControls();
-      setDisplay('roomWaiting', 'none');
-      setStatus('');
-      let sec = data && Number.isFinite(data.seconds) ? data.seconds : 3;
-      setTitle(`Starting in ${sec}...`);
-      setDisplay('gameArea', 'block');
-      setDisplay('modeSelect', 'none');
-      setDisplay('typeTab', 'none');
-      const cd = setInterval(() => {
-        sec--;
-        if (sec <= 0) clearInterval(cd);
-        else setTitle(`Starting in ${sec}...`);
-      }, 1000);
-    });
+  closeRoomModal();
+  hideQueueControls();
+  setDisplay('roomWaiting', 'none');
+  setStatus('');
+  setDisplay('gameArea', 'block');
+  setDisplay('modeSelect', 'none');
+  setDisplay('typeTab', 'none');
+
+  syncServerClock(data && data.serverNow);
+  serverStartTime = (data && Number.isFinite(data.startTime))
+    ? data.startTime
+    : syncedNow() + ((data && data.seconds) || 3) * 1000;
+
+  runCountdown();   // 표시 전용. 실제 입력 활성화는 이어지는 gameStart에서 처리
+});
 
     sub('roomError', (data) => {
       setStatus('⚠️ ' + ((data && data.message) || 'Room error'));
@@ -1102,41 +1111,56 @@
       if (qd) qd.style.transform = `translateY(-${Math.max(0, row) * LINE_HEIGHT}px)`;
     }
 
-    function startCountdown() {
-      hideQueueControls();   // 카운트다운 진입 = 대기열 컨트롤 제거
-      clearInterval(countdownInterval);
-      countdownInterval = setInterval(() => {
-        const remainingMs = serverStartTime - Date.now();
-        if (remainingMs <= 0) {
-          clearInterval(countdownInterval);
-          setTitle('Start typing!');
-          const ti = el('typingInput');
-          if (ti) { ti.disabled = false; ti.readOnly = false; ti.focus(); }
-          addCls('matchupBar', 'hidden-state');
-          setDisplay('leaveMatchRow', 'block');
-          startGameTimer();
-        } else {
-          setTitle(`Starting in ${Math.ceil(remainingMs / 1000)}...`);
-        }
-      }, 100);
-    }
+    // serverStartTime(서버 절대 시각)과 보정된 현재 시각의 차이로 3, 2, 1을 계산한다.
+// 1초씩 깎는 방식이 아니라 매 틱마다 남은 시간을 새로 계산하므로 오차가 누적되지 않는다.
+function runCountdown(onZero) {
+  hideQueueControls();
+  clearInterval(countdownInterval);
+  let lastShown = null;
 
-    function startGameTimer() {
-      clearInterval(gameTimerInterval);
-      gameTimerInterval = setInterval(() => {
-        const elapsed = (Date.now() - serverStartTime) / 1000;
+  const tick = () => {
+    const remainingMs = serverStartTime - syncedNow();
+    if (remainingMs <= 0) {
+      clearInterval(countdownInterval);
+      setTitle('Start!');
+      if (typeof onZero === 'function') onZero();
+      return;
+    }
+    const sec = Math.ceil(remainingMs / 1000);
+    if (sec !== lastShown) {
+      lastShown = sec;
+      setTitle(`Starting in ${sec}...`);
+    }
+  };
+
+  tick();
+  countdownInterval = setInterval(tick, 50);
+}
+
+function startCountdown() {
+    runCountdown(() => {
+        const ti = el('typingInput');
+        if (ti) ti.disabled = false;
+        addCls('matchupBar', 'hidden-start');
+        setDisplay('leaveMatchRow', 'block');
+        startGameTimer();
+    });
+}
+
+// 👇 여기(1149번째 줄 아래)에 그대로 붙여넣기!
+function startGameTimer() {
+    clearInterval(gameTimerInterval);
+    gameTimerInterval = setInterval(() => {
+        const elapsed = (syncedNow() - serverStartTime) / 1000;
         const remaining = Math.max(0, Math.round(duration - elapsed));
         setText('timer', remaining);
         if (remaining <= 0) {
-          clearInterval(gameTimerInterval);
-          const ti = el('typingInput');
-          if (ti) ti.disabled = true;
-          // 타임아웃 시 서버로 별도 emit이 필요 없다: 서버는 startMatch()에서 자신만의
-          // setTimeout으로 동일한 시점에 endGame()을 호출하며, 그때 쓰이는 netCorrect는
-          // 이미 이 대전 내내 보낸 'progress' emit들을 통해 서버에 누적 반영되어 있다.
+            clearInterval(gameTimerInterval);
+            const ti = el('typingInput');
+            if (ti) ti.disabled = true;
         }
-      }, 200);
-    }
+    }, 200);
+}
 
     /* =========================================================
        11-B) 타이핑 입력 — Practice와 매치가 완전히 동일한 로직을 공유한다.
@@ -1392,6 +1416,7 @@
       currentDuration = data.duration;
       sampleText = data.text;
       duration = data.duration;
+      syncServerClock(data.serverNow);   // ← 추가
       serverStartTime = data.startTime;
       isRanked = !!data.isRanked;
 
