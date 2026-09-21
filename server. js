@@ -1,4 +1,3 @@
-// server.js
 const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
@@ -11,6 +10,66 @@ const io = new Server(server, { cors: { origin: '*' } });
 const PORT = process.env.PORT || 3000;
 app.use(express.static(path.join(__dirname, 'public')));
 
+function getTrophyChange(result, duration) {
+  const base = result === 'win' ? 10 : result === 'lose' ? -3 : 0;
+  const multiplier = duration === 30 ? 0.8 : duration === 120 ? 1.5 : 1.0;
+  return Math.round(base * multiplier);
+}
+
+// --- Season / Trophy Reset System ---
+const SEASON_SOFT_RESET_RATIO = 0.5;
+const SEASON_SOFT_RESET_FLOOR = 500;
+
+const seasonState = {
+  lastMmrResetMonth: null,
+  lastTrophyResetMonth: null
+};
+
+const accountPreResetRatings = {};
+const accountMonthlyTrophies = {};
+
+function getCurrentMonth() {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+}
+
+function softResetMMR(mmr) {
+  return Math.round(mmr * SEASON_SOFT_RESET_RATIO + SEASON_SOFT_RESET_FLOOR);
+}
+
+function runSeasonResets() {
+  const currentMonth = getCurrentMonth();
+
+  if (seasonState.lastMmrResetMonth !== currentMonth) {
+    for (const [id, rating] of Object.entries(userRatings)) {
+      const sock = io.sockets.sockets.get(id);
+      const playerId = sock && sock.data ? sock.data.playerId : null;
+      if (playerId) {
+        accountPreResetRatings[playerId] = rating;
+      }
+      userRatings[id] = softResetMMR(rating);
+      if (playerId) {
+        accountRatings[playerId] = userRatings[id];
+      }
+    }
+    seasonState.lastMmrResetMonth = currentMonth;
+    console.log(`[Season] MMR soft reset applied for month ${currentMonth}`);
+  }
+
+  if (seasonState.lastTrophyResetMonth !== currentMonth) {
+    for (const [id] of Object.entries(userTrophies)) {
+      userTrophies[id] = 0;
+    }
+    for (const [pid] of Object.entries(accountTrophies)) {
+      accountMonthlyTrophies[pid] = 0;
+    }
+    seasonState.lastTrophyResetMonth = currentMonth;
+    console.log(`[Season] Trophy leaderboard reset for month ${currentMonth}`);
+  }
+}
+
+// ★ 단어 풀: 총 300개 (중복 없음). index.html의 WORD_POOL 배열과 반드시 동일해야 한다.
+//   - 1~110번: 기존 단어 / 111~300번: 신규 추가 단어
 const timeModeWordPool = [
   "the", "be", "to", "of", "and", "a", "in", "that", "have", "it",
   "for", "not", "on", "with", "he", "as", "you", "do", "at", "this",
@@ -22,29 +81,262 @@ const timeModeWordPool = [
   "then", "now", "look", "only", "come", "its", "over", "think", "also", "back",
   "after", "use", "two", "how", "our", "work", "first", "well", "way", "even",
   "new", "want", "because", "any", "these", "give", "day", "most", "us", "code",
-  "program", "system", "run", "fast", "type", "keyboard", "match", "win", "play", "speed"
+  "program", "system", "run", "fast", "type", "keyboard", "match", "win", "play", "speed",
+  "man", "find", "here", "thing", "tell", "many", "very", "through", "should", "call",
+  "world", "school", "still", "try", "last", "ask", "need", "too", "feel", "three",
+  "state", "never", "become", "between", "high", "really", "something", "another", "family", "own",
+  "leave", "put", "old", "while", "mean", "keep", "student", "why", "let", "great",
+  "same", "big", "group", "begin", "seem", "country", "help", "talk", "turn", "problem",
+  "every", "start", "hand", "might", "show", "part", "against", "place", "such", "again",
+  "few", "case", "week", "company", "where", "must", "right", "study", "book", "eye",
+  "job", "word", "though", "business", "issue", "side", "kind", "four", "head", "far",
+  "black", "long", "both", "little", "house", "since", "provide", "service", "around", "friend",
+  "important", "father", "sit", "away", "until", "power", "hour", "game", "often", "yet",
+  "line", "end", "among", "ever", "stand", "bad", "lose", "however", "member", "pay",
+  "law", "meet", "car", "city", "almost", "include", "continue", "set", "later", "community",
+  "much", "name", "five", "once", "white", "least", "learn", "real", "change", "team",
+  "minute", "best", "several", "idea", "body", "information", "nothing", "lead", "social", "understand",
+  "whether", "watch", "together", "follow", "parent", "stop", "face", "anything", "create", "public",
+  "already", "speak", "others", "read", "level", "allow", "add", "office", "spend", "door",
+  "health", "person", "art", "sure", "history", "within", "grow", "result", "open", "morning",
+  "walk", "reason", "low", "research", "early", "food", "before", "moment", "himself", "air",
+  "teacher", "force", "offer", "enough", "education", "across", "although", "remember", "foot", "second"
 ];
+
+// 안전장치: 단어 풀이 300개가 아니거나 중복이 있으면 서버 시작 시 경고를 출력한다.
+if (timeModeWordPool.length !== 300 || new Set(timeModeWordPool).size !== timeModeWordPool.length) {
+  console.warn(`[WordPool] 경고: 단어 수=${timeModeWordPool.length}, 고유 단어 수=${new Set(timeModeWordPool).size} (300개/중복 없음이어야 함)`);
+}
 
 const ALLOWED_TIME_DURATIONS = [30, 60, 120];
 const DEFAULT_TIME_DURATION = 60;
-const COUNTDOWN_MS = 3000;
-const WORDS_MODE_TIMEOUT_MS = 5 * 60 * 1000;
+
+// ★ 서버 주도 카운트다운: 3 -> 2 -> 1 -> START 를 서버가 1초 간격으로 직접 방송한다.
+//   클라이언트 시계(Date.now)는 전혀 사용하지 않는다.
+const COUNTDOWN_SECONDS = 3;
+const COUNTDOWN_TICK_MS = 1000;
+
+const RANKED_UNLOCK_WINS = 3;
+// --- Anti-Cheat: 타이핑 검증 ---
+const ANTICHEAT_MIN_INTERVAL_MS = 20;          // 이 값 미만 간격이 연속되면 매크로 의심
+const ANTICHEAT_MIN_INTERVAL_STRIKE_COUNT = 5;  // 연속 위반이 이 횟수 이상이면 즉시 판정
+const ANTICHEAT_UNIFORMITY_WINDOW = 12;         // 정속 패턴 판정에 쓰는 최근 입력 개수
+const ANTICHEAT_UNIFORMITY_STDDEV_MS = 3;       // 표준편차가 이 값 미만이면 "정밀한 정속 입력"으로 의심
+const ANTICHEAT_UNIFORMITY_MEAN_MAX_MS = 90;    // 위 판정은 평균 간격도 충분히 빠를 때만 적용 (느리지만 꾸준한 사람도 있으므로)
+const ANTICHEAT_MAX_WPM = 250;                  // 지속 최고 속도 제한
+const ANTICHEAT_MAX_WPM_MIN_CHARS = 40;         // 이 정도 타이핑 후부터 WPM 판정 시작 (초반 표본 부족 방지)
+const ANTICHEAT_DELTA_HISTORY_CAP = 400;        // 플레이어별 delta 보관 최대 개수 (메모리 보호)
 
 const userRatings = {};
 const userNames = {};
 const userAvatars = {};
-const waitingNormalPlayers = {};
-
-// 프로필에서 선택 가능한 아바타 이모지 화이트리스트.
-// 클라이언트가 임의 문자열을 보내도 여기 없으면 서버가 거부한다.
+const userNormalWins = {};
+const accountNormalWins = {};
+const waitingNormalPlayers = {}; // { matchKey: [socket, ...] } — 대기열 (동일 계정 매칭 방지 필터 적용)
+const userTrophies = {};
+const accountTrophies = {};
+const accountRatings = {};
+const accountNames = {};
 const ALLOWED_AVATARS = ['😀', '😎', '🤖', '🐱', '🐶', '🦊', '🐼', '🐵', '🔥', '⚡', '🎯', '🚀'];
 const DEFAULT_AVATAR = ALLOWED_AVATARS[0];
-const NICKNAME_MIN_LEN = 2;
-const NICKNAME_MAX_LEN = 12;
+
+// --- 중복 접속 / 어뷰징 방지 (Anti-Abuse) ---
+// [주의] 테스트 목적으로 IP 기반 판정은 완전히 제거됨. 동일 playerId(계정) 기준으로만 판정한다.
+const playerIdToSocket = {}; // { playerId: socketId } — 동일 계정 다중 접속 차단용
+
+// 두 소켓이 같은 계정(playerId)에서 접속했는지 판정한다.
+// true면 매칭이 성립되지 않고, 이미 진행된 대전(커스텀 룸 등)이라면 보상이 무효화된다.
+function isAbusivePair(socketA, socketB) {
+  if (!socketA || !socketB) return false;
+  const pidA = socketA.data && socketA.data.playerId;
+  const pidB = socketB.data && socketB.data.playerId;
+  return !!(pidA && pidB && pidA === pidB);
+}
+
+// Player # + 6자리 랜덤 숫자 형태의 닉네임 생성
+function generatePlayerCode() {
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+  let result = '';
+  for (let i = 0; i < 6; i++) {
+    result += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  return result;
+}
+
+function generatePlayerNick(code) {
+  return `Player #${code}`;
+}
+
+// 랭킹 순위 기반 닉네임 태그 생성 (100위 이내에만 [#순위] 태그 부여)
+function buildPlayerTags(playerId, topRankList) {
+  if (!topRankList) return '';
+  const idx = topRankList.findIndex(entry => entry.playerId === playerId);
+  if (idx === -1) return '';
+  const rank = idx + 1;
+  if (rank <= 100) return `[#${rank}]`;
+  return '';
+}
+
+// 기존 닉네임에 붙은 [#...] 태그를 모두 떼어내고, 새로 받은 랭킹 태그를 붙여 반환한다.
+function appendDynamicTag(baseNick, rankTag) {
+  const base = baseNick || '';
+  const coreName = base.replace(/\[[^\]]*\]\s*/g, '').trim();
+  if (!coreName) return rankTag.trim();
+  return `${coreName} ${rankTag}`.trim();
+}
+
+// ============================================================
+// ★ 수정됨: 랭킹 계산은 "현재 접속 중인 소켓" 단위가 아니라
+//   "계정(playerId)" 단위로, 그리고 접속 여부와 무관하게
+//   서버가 알고 있는 전체 계정 데이터(accountRatings 등)를 기준으로 계산한다.
+//
+//   기존 버그:
+//   1) userRatings는 socket.id를 key로 사용하는데, 소켓 disconnect 시
+//      해당 항목이 정리(삭제)되지 않아 접속 종료된 "유령 소켓" 데이터가
+//      영구적으로 랭킹 풀에 남아 계속 누적됨.
+//   2) 매 접속(새로고침)마다 새로운 socket.id가 생성되어 기본값(1000점 등)으로
+//      랭킹 풀에 추가되므로, 동점자가 많아지고 동점 처리 시 정렬 기준이
+//      명시적이지 않아(=Object 삽입 순서에 의존) 순위가 접속할 때마다
+//      달라지는 것처럼(사실상 무작위처럼) 보였음.
+//   3) buildPlayerTags는 entry.playerId를 찾는데, 기존 buildTopRankList는
+//      entry.id(=socket.id)만 채워서 반환했기 때문에 닉네임 랭크 태그는
+//      항상 매칭 실패로 빈 문자열이 되는 별도 버그도 있었음(이번에 같이 수정).
+//
+//   수정 후:
+//   - playerId(계정)별로 유일하게 하나의 항목만 존재하도록 dedupe.
+//   - 접속 중이면 최신 socket 기준 값(userRatings 등), 아니면 영구 저장된
+//     accountRatings/accountTrophies/accountNormalWins 값을 사용.
+//   - 1차: rating(또는 trophy) 내림차순, 2차: 승수(wins) 내림차순,
+//     3차: playerId 문자열 비교(완전한 동점자까지 결정론적으로 순서 고정)
+//     로 정렬해 동일 입력에 대해 항상 동일한 순위가 나오도록 보장.
+// ============================================================
+
+// 현재 서버가 알고 있는 전체 계정 기준 랭킹 리스트(상위 100명)를 만든다.
+// sortBy: 'rating' (MMR 기준, 기본값) | 'trophy' (트로피 기준)
+function buildTopRankList(sortBy = 'rating') {
+  const byAccount = new Map();
+
+  // 1) 현재 접속 중인 소켓들의 최신 값을 계정 단위로 모은다.
+  for (const [socketId, sock] of io.sockets.sockets) {
+    const playerId = sock.data && sock.data.playerId;
+    if (!playerId) continue; // 아직 identify 되지 않은 소켓은 랭킹에서 제외
+    byAccount.set(playerId, {
+      playerId,
+      rating: Number.isFinite(userRatings[socketId]) ? userRatings[socketId] : (accountRatings[playerId] ?? 1000),
+      trophies: Number.isFinite(userTrophies[socketId]) ? userTrophies[socketId] : (accountTrophies[playerId] ?? 0),
+      wins: Number.isFinite(userNormalWins[socketId]) ? userNormalWins[socketId] : (accountNormalWins[playerId] ?? 0)
+    });
+  }
+
+  // 2) 현재 접속하지 않은(오프라인) 계정도 영구 저장된 값 기준으로 포함시킨다.
+  for (const playerId of Object.keys(accountRatings)) {
+    if (byAccount.has(playerId)) continue;
+    byAccount.set(playerId, {
+      playerId,
+      rating: accountRatings[playerId] ?? 1000,
+      trophies: accountTrophies[playerId] ?? 0,
+      wins: accountNormalWins[playerId] ?? 0
+    });
+  }
+
+  const list = Array.from(byAccount.values());
+
+  const primaryKey = sortBy === 'trophy' ? 'trophies' : 'rating';
+  list.sort((a, b) => {
+    if (b[primaryKey] !== a[primaryKey]) return b[primaryKey] - a[primaryKey]; // 1차: 점수 내림차순
+    if (b.wins !== a.wins) return b.wins - a.wins;                             // 2차: 일반전 승수 내림차순
+    return a.playerId.localeCompare(b.playerId);                               // 3차: 계정ID 사전순(완전 동률 결정론적 처리)
+  });
+
+  return list.slice(0, 100);
+}
+
+// 주어진 소켓 ID에 대해, 현재 전역 랭킹 순위 기반 태그를 생성한다.
+function buildRankTagForSocket(socketId) {
+  const sock = io.sockets.sockets.get(socketId);
+  const playerId = sock && sock.data ? sock.data.playerId : null;
+  if (!playerId) return '';
+  const topRankList = buildTopRankList('rating');
+  return buildPlayerTags(playerId, topRankList);
+}
+
+// 주어진 소켓 ID의 현재 전역 순위(1~100)를 반환. 100위 밖이거나 미식별 소켓이면 null.
+// sortBy: 'rating' (기본값, MMR 기준) | 'trophy'
+function getPlayerRankInfo(socketId, sortBy = 'rating') {
+  const sock = io.sockets.sockets.get(socketId);
+  const playerId = sock && sock.data ? sock.data.playerId : null;
+  if (!playerId) return null;
+  const topRankList = buildTopRankList(sortBy);
+  const idx = topRankList.findIndex(entry => entry.playerId === playerId);
+  return idx === -1 ? null : idx + 1;
+}
+
 const waitingRankedPlayers = [];
 const rooms = {};
+const customRooms = {}; // { CODE: { mode, duration, isRanked, players: [socket] } }
 
-// LoL 스타일 티어 시스템: 레이팅 구간별로 아이언~챌린저를 부여한다.
+// --- Rematch System ---
+const REMATCH_TIMEOUT_MS = 10000; // 재경기 수락 대기 시간 (10초)
+const RECENT_MATCH_TTL_MS = 60000; // 경기 종료 후 재경기 요청이 가능한 유효 시간
+const recentMatches = {}; // { roomId: { playerIds: [idA, idB], mode, duration, isRanked } } — 방금 끝난 경기 정보
+const pendingRematches = {}; // { roomId: { accepted: Set<socketId>, timeoutId } } — 재경기 수락 대기 상태
+
+function cleanupPendingRematch(roomId) {
+  const pending = pendingRematches[roomId];
+  if (pending) {
+    clearTimeout(pending.timeoutId);
+    delete pendingRematches[roomId];
+  }
+}
+
+// --- Report System ---
+const reportLogs = [];
+const reportedInMatch = {};
+
+const DISCORD_REPORT_WEBHOOK = process.env.DISCORD_REPORT_WEBHOOK || '';
+
+function sendDiscordReportWebhook(entry) {
+  if (!DISCORD_REPORT_WEBHOOK) return;
+
+  const reasonLabels = {
+    cheating: 'Cheating / Auto-typer',
+    inappropriate_name: 'Inappropriate Name',
+    other: 'Other'
+  };
+
+  const embed = {
+    title: '🚨 NEW USER REPORT',
+    color: 0xff4444,
+    fields: [
+      { name: 'Reporter', value: `${entry.reporterName} (\`${entry.reporterId}\`)`, inline: true },
+      { name: 'Target',   value: `${entry.targetName} (\`${entry.targetId}\`)`,   inline: true },
+      { name: 'Reason',   value: reasonLabels[entry.reason] || entry.reason,       inline: true },
+      { name: 'Room',     value: entry.roomId,                                     inline: true },
+      { name: 'Time (UTC)', value: entry.timestamp,                                inline: true }
+    ],
+    footer: { text: 'Typing Multiplayer — Report System' },
+    timestamp: entry.timestamp
+  };
+
+  fetch(DISCORD_REPORT_WEBHOOK, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ embeds: [embed] })
+  })
+    .then((res) => {
+      if (!res.ok) console.error(`[Discord] Webhook failed: ${res.status} ${res.statusText}`);
+      else console.log('[Discord] Report webhook sent successfully.');
+    })
+    .catch((err) => console.error('[Discord] Webhook error:', err.message));
+}
+
+function generateRoomCode() {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  let code = '';
+  for (let i = 0; i < 6; i++) code += chars[Math.floor(Math.random() * chars.length)];
+  return code;
+}
+
 const TIERS = [
   { min: 1900, label: '챌린저', color: '#f97316', icon: '🔥' },
   { min: 1700, label: '마스터', color: '#a855f7', icon: '👑' },
@@ -61,26 +353,25 @@ function getTierInfo(rating) {
   return TIERS.find((t) => safeRating >= t.min) || TIERS[TIERS.length - 1];
 }
 
-
 function timeModeWordCount(duration) {
   return Math.max(200, Math.ceil(duration * 6));
 }
 
-// 두 단어가 "너무 치기 쉬운 조합"인지 판정
 function isEasyTransition(prevWord, nextWord) {
   if (!prevWord) return false;
-  if (prevWord === nextWord) return true; // 같은 단어 연속
-  if (prevWord.length <= 3 && nextWord.length <= 3) return true; // 짧은 단어끼리 연속 (예: "of the")
-  if (prevWord[prevWord.length - 1] === nextWord[0]) return true; // 앞단어 끝글자 = 다음단어 첫글자
+  if (prevWord === nextWord) return true;
+  if (prevWord.length <= 3 && nextWord.length <= 3) return true;
+  if (prevWord[prevWord.length - 1] === nextWord[0]) return true;
   return false;
 }
 
 function pickNextWord(pool, prevWord) {
   const candidates = pool.filter(w => !isEasyTransition(prevWord, w));
-  const source = candidates.length > 0 ? candidates : pool; // 후보가 없으면 제약 풀어줌 (무한루프 방지)
+  const source = candidates.length > 0 ? candidates : pool;
   return source[Math.floor(Math.random() * source.length)];
 }
 
+// 대전(1v1) 텍스트와 연습 모드 텍스트 모두 이 함수를 통해 300개 단어 풀(timeModeWordPool)에서 무작위 추출된다.
 function generateRandomText(targetWordCount) {
   const words = [];
   let prevWord = null;
@@ -93,7 +384,7 @@ function generateRandomText(targetWordCount) {
 }
 
 function generateUniqueText(mode, duration, previousText = '') {
-  const targetCount = mode === 'words' ? (40 + Math.floor(Math.random() * 11)) : timeModeWordCount(duration);
+  const targetCount = timeModeWordCount(duration);
   let newText = generateRandomText(targetCount);
   let attempts = 0;
   while (newText === previousText && attempts < 10) {
@@ -114,35 +405,99 @@ function calculateNewRatings(winnerRating, loserRating) {
   return { newWinnerRating, newLoserRating };
 }
 
-// 매칭 대기열(일반전/경쟁전)에서 해당 소켓을 제거한다. cancelSearch, disconnect 양쪽에서 재사용.
 function removeFromWaitingQueues(socket) {
+  delete soloPracticeSessions[socket.id];
   Object.keys(waitingNormalPlayers).forEach((k) => {
-    if (waitingNormalPlayers[k] === socket) delete waitingNormalPlayers[k];
+    if (!Array.isArray(waitingNormalPlayers[k])) return;
+    waitingNormalPlayers[k] = waitingNormalPlayers[k].filter((s) => s !== socket);
+    if (waitingNormalPlayers[k].length === 0) delete waitingNormalPlayers[k];
   });
   const rIdx = waitingRankedPlayers.findIndex((p) => p.socket === socket);
   if (rIdx > -1) waitingRankedPlayers.splice(rIdx, 1);
 }
 
-// 닉네임 검증: 앞뒤 공백 제거, 꺾쇠괄호 제거(간단한 XSS 방지), 길이 제한.
-// 조건을 만족하지 못하면 null을 반환해 호출부에서 기존 값을 유지하도록 한다.
-function sanitizeNickname(raw) {
-  if (typeof raw !== 'string') return null;
-  const trimmed = raw.trim().replace(/[<>]/g, '');
-  if (trimmed.length < NICKNAME_MIN_LEN || trimmed.length > NICKNAME_MAX_LEN) return null;
-  return trimmed;
+const PRACTICE_TEXT_DURATION = 60;
+const soloPracticeSessions = {};
+
+function clearPracticeSession(socketId) {
+  delete soloPracticeSessions[socketId];
 }
 
-// 아바타는 화이트리스트에 있는 값만 허용한다.
-function sanitizeAvatar(raw) {
-  return ALLOWED_AVATARS.includes(raw) ? raw : null;
+// 클라이언트가 보내는 playerId를 검증/정규화한다.
+// "Player #XXXXXX" 형태와 순수 6자리 코드("XXXXXX") 형태 모두 허용하고,
+// 항상 "Player #XXXXXX" (대문자 코드) 표준 형태로 통일해서 반환한다.
+function sanitizePlayerId(raw) {
+  if (typeof raw !== 'string') return null;
+  const id = raw.trim();
+  const fullMatch = id.match(/^Player #([A-Z0-9]{6})$/i);
+  if (fullMatch) return `Player #${fullMatch[1].toUpperCase()}`;
+  if (/^[A-Z0-9]{6}$/i.test(id)) return `Player #${id.toUpperCase()}`;
+  return null;
+}
+
+function getNormalWins(socket) {
+  return userNormalWins[socket.id] || 0;
+}
+
+function isRankedUnlocked(socket) {
+  return getNormalWins(socket) >= RANKED_UNLOCK_WINS;
+}
+
+function unlockPayload(socket) {
+  const normalWins = getNormalWins(socket);
+  return {
+    normalWins,
+    requiredWins: RANKED_UNLOCK_WINS,
+    rankedUnlocked: normalWins >= RANKED_UNLOCK_WINS
+  };
+}
+
+function persistNormalWins(socket) {
+  if (socket.data && socket.data.playerId) {
+    accountNormalWins[socket.data.playerId] = getNormalWins(socket);
+    accountRatings[socket.data.playerId] = userRatings[socket.id] || 1000;
+    const baseName = (userNames[socket.id] || '').replace(/\[[^\]]*\]\s*/g, '').trim();
+    if (baseName) accountNames[socket.data.playerId] = baseName;
+  }
+}
+
+function persistRatings(socket) {
+  if (socket.data && socket.data.playerId) {
+    accountRatings[socket.data.playerId] = userRatings[socket.id] || 1000;
+  }
+}
+
+function persistTrophies(socket) {
+  if (socket.data && socket.data.playerId) {
+    const pid = socket.data.playerId;
+    const currentTrophies = userTrophies[socket.id] || 0;
+    accountTrophies[pid] = currentTrophies;
+    accountMonthlyTrophies[pid] = currentTrophies;
+  }
+}
+
+function addNormalWin(socket) {
+  if (!socket) return;
+  const wasUnlocked = isRankedUnlocked(socket);
+  userNormalWins[socket.id] = getNormalWins(socket) + 1;
+  persistNormalWins(socket);
+  const payload = unlockPayload(socket);
+  payload.justUnlocked = !wasUnlocked && payload.rankedUnlocked;
+  socket.emit('unlockStatus', payload);
+  return payload;
 }
 
 function createEmptyPlayerState() {
-  return { percent: 0, accuracy: 100, charIndex: 0, finished: false, netCorrect: 0, totalTyped: 0, totalErrors: 0 };
+  return {
+    percent: 0, accuracy: 100, charIndex: 0, finished: false, finishTime: null,
+    netCorrect: 0, totalTyped: 0, totalErrors: 0,
+    // --- Anti-Cheat ---
+    deltaHistory: [],   // 최근 keystroke 간격(ms) 기록 (서버 메모리에만 보관, 검증용)
+    fastStreak: 0,      // 연속으로 임계치 미만 간격이 발생한 횟수
+    disqualified: false
+  };
 }
 
-// 클라이언트가 보내는 progress/finished 데이터는 항상 이 함수를 통해 정제한다.
-// 정확도 하한선(예: 90% 이상만 인정) 같은 게이트는 절대 여기에 추가하지 않는다.
 function sanitizeStat(data, sampleTextLength) {
   const accuracy = Number.isFinite(data.accuracy) ? Math.max(0, Math.min(100, data.accuracy)) : 100;
   const charIndex = Number.isFinite(data.charIndex)
@@ -154,23 +509,136 @@ function sanitizeStat(data, sampleTextLength) {
   return { accuracy, charIndex, netCorrect, totalTyped, totalErrors };
 }
 
-function startMatch(playerA, playerB, mode, duration, isRanked) {
-  const roomId = `room_${playerA.id}_${playerB.id}_${Date.now()}`;
+// 클라이언트가 보낸 keystroke 간격(ms) 배치를 플레이어 상태에 반영한다.
+// 개수/값 범위를 서버에서 재검증해 비정상적으로 큰 배열이나 음수·과대값 주입을 막는다.
+function recordAntiCheatDeltas(player, rawDeltas) {
+  if (!Array.isArray(rawDeltas)) return;
+  const clean = rawDeltas
+    .filter((d) => Number.isFinite(d) && d >= 0 && d < 10000)
+    .slice(0, 50); // 한 번에 비정상적으로 큰 배열을 보내는 것 자체도 조작 신호이므로 상한
+
+  clean.forEach((delta) => {
+    player.deltaHistory.push(delta);
+    if (player.deltaHistory.length > ANTICHEAT_DELTA_HISTORY_CAP) player.deltaHistory.shift();
+    player.fastStreak = delta < ANTICHEAT_MIN_INTERVAL_MS ? player.fastStreak + 1 : 0;
+  });
+}
+
+// 매크로/오토핫키형 패턴 감지: (1) 연속 초단타, (2) 사람이 치기 힘든 수준의 균일(정속) 타건
+function detectMacroPattern(player) {
+  if (player.fastStreak >= ANTICHEAT_MIN_INTERVAL_STRIKE_COUNT) {
+    return 'MACRO_MIN_INTERVAL';
+  }
+
+  const window = player.deltaHistory.slice(-ANTICHEAT_UNIFORMITY_WINDOW);
+  if (window.length >= ANTICHEAT_UNIFORMITY_WINDOW) {
+    const mean = window.reduce((a, b) => a + b, 0) / window.length;
+    if (mean <= ANTICHEAT_UNIFORMITY_MEAN_MAX_MS) {
+      const variance = window.reduce((a, b) => a + (b - mean) * (b - mean), 0) / window.length;
+      const stddev = Math.sqrt(variance);
+      if (stddev < ANTICHEAT_UNIFORMITY_STDDEV_MS) {
+        return 'MACRO_UNIFORM_TIMING';
+      }
+    }
+  }
+  return null;
+}
+
+// 지속 최고 속도(WPM) 제한 감지 — START 신호를 보낸 시각(room.startTime) 기준 누적 타수로 계산.
+function detectSpeedLimit(player, room) {
+  if (!room.started || !Number.isFinite(room.startTime)) return null;
+  if (player.totalTyped < ANTICHEAT_MAX_WPM_MIN_CHARS) return null;
+  const elapsedMs = Date.now() - room.startTime;
+  if (elapsedMs <= 0) return null;
+  const minutes = elapsedMs / 60000;
+  const wpm = (player.totalTyped / 5) / minutes;
+  return wpm >= ANTICHEAT_MAX_WPM ? 'SPEED_LIMIT_EXCEEDED' : null;
+}
+
+// 감지된 부정행위자를 즉시 몰수패 처리한다. endGame을 그대로 재사용하므로
+// 상대는 랭크 MMR/트로피/정상승수까지 일반 승리와 동일하게 정산된다.
+function disqualifyPlayer(roomId, cheaterId, reasonCode) {
+  const room = rooms[roomId];
+  if (!room || room.ended) return;
+  const winnerId = Object.keys(room.players).find((id) => id !== cheaterId) || null;
+  console.log(`[Anti-Cheat] Disqualified in room ${roomId}: player=${cheaterId} reason=${reasonCode}`);
+  endGame(roomId, winnerId, { reason: 'cheat_detected', cheatReason: reasonCode, cheaterId });
+}
+
+// ============================================================
+// ★ 서버 주도 카운트다운
+//   - 방 안의 "두 플레이어 소켓"에게만 직접 emit 한다.
+//     (io.to(roomId)를 쓰면 커스텀룸 코드가 재사용될 때 이전 경기 소켓이 섞일 수 있음)
+//   - 1초 간격으로 { value: 3 } -> { value: 2 } -> { value: 1 } -> { value: 'START' }
+//   - START를 보내는 그 시점에 room.started = true, room.startTime 기록, 종료 타이머 시작.
+// ============================================================
+function emitToRoomPlayers(room, event, payload) {
+  Object.keys(room.players).forEach((id) => {
+    io.to(id).emit(event, payload);
+  });
+}
+
+function stopCountdown(room) {
+  if (room && room.countdownTimerId) {
+    clearInterval(room.countdownTimerId);
+    room.countdownTimerId = null;
+  }
+}
+
+function runServerCountdown(roomId) {
+  const room = rooms[roomId];
+  if (!room || room.ended) return;
+
+  let remaining = COUNTDOWN_SECONDS;
+  emitToRoomPlayers(room, 'countdownTick', { value: remaining });
+
+  room.countdownTimerId = setInterval(() => {
+    const r = rooms[roomId];
+    if (!r || r.ended) {
+      if (r) stopCountdown(r);
+      return;
+    }
+
+    remaining -= 1;
+
+    if (remaining > 0) {
+      emitToRoomPlayers(r, 'countdownTick', { value: remaining });
+      return;
+    }
+
+    // ★ START — 양쪽 클라이언트가 동시에 입력창을 열고 타이머를 시작한다.
+    stopCountdown(r);
+    r.started = true;
+    r.startTime = Date.now(); // 서버 내부 기록용 (Anti-Cheat WPM 계산에만 사용)
+    emitToRoomPlayers(r, 'countdownTick', { value: 'START' });
+
+    // 종료 타이머는 START 시점부터 duration 만큼
+    r.endTimeoutId = setTimeout(() => endGame(roomId, undefined), r.duration * 1000);
+  }, COUNTDOWN_TICK_MS);
+}
+
+function startMatch(playerA, playerB, mode, duration, isRanked, customRoomId) {
+  const roomId = customRoomId || `room_${playerA.id}_${playerB.id}_${Date.now()}`;
   const prevTextA = playerA.data.lastText || '';
   const text = generateUniqueText(mode, duration, prevTextA);
 
   playerA.data.lastText = text;
   playerB.data.lastText = text;
 
-  const startTime = Date.now() + COUNTDOWN_MS;
-
   playerA.join(roomId);
   playerB.join(roomId);
   playerA.data.roomId = roomId;
   playerB.data.roomId = roomId;
 
+  const invalidated = isAbusivePair(playerA, playerB);
+  if (invalidated) console.log(`[Anti-Abuse] Same-account match created: ${roomId}`);
+
   rooms[roomId] = {
-    mode, text, startTime, duration, isRanked,
+    mode, text, duration, isRanked,
+    invalidated,
+    started: false,          // ★ START 신호 전송 후 true
+    startTime: null,         // ★ START 신호 전송 시각 (서버 내부용)
+    countdownTimerId: null,
     endTimeoutId: null, ended: false, players: {}
   };
   rooms[roomId].players[playerA.id] = createEmptyPlayerState();
@@ -184,35 +652,44 @@ function startMatch(playerA, playerB, mode, duration, isRanked) {
   const avatarB = userAvatars[playerB.id] || DEFAULT_AVATAR;
   const tierA = getTierInfo(ratingA);
   const tierB = getTierInfo(ratingB);
+  const trophiesA = userTrophies[playerA.id] || 0;
+  const trophiesB = userTrophies[playerB.id] || 0;
+  // 매치 시작 시점 기준 전역 순위 (100위 밖이면 null)
+  const rankA = getPlayerRankInfo(playerA.id, isRanked ? 'rating' : 'trophy');
+  const rankB = getPlayerRankInfo(playerB.id, isRanked ? 'rating' : 'trophy');
 
+  // ★ gameStart는 "셋업" 신호다. startTime은 더 이상 보내지 않는다.
+  //   실제 시작 시점은 이후 countdownTick의 'START'가 결정한다.
   const basePayload = {
-    mode, text, startTime,
+    mode, text,
     duration: mode === 'time' ? duration : null,
     isRanked
   };
 
-  // 각 플레이어에게 "나"와 "상대" 관점으로 개인화된 데이터를 보낸다.
-  // (레이팅/티어/닉네임/아바타는 방송이 아니라 소켓별로 따로 보내야 me/opponent 구분이 명확함)
   playerA.emit('gameStart', {
     ...basePayload,
-    myName: nameA, myRating: ratingA, myTier: tierA, myAvatar: avatarA,
-    opponentName: nameB, opponentRating: ratingB, opponentTier: tierB, opponentAvatar: avatarB
+    myName: nameA, myRating: ratingA, myTier: tierA, myAvatar: avatarA, myTrophies: trophiesA, myRank: rankA,
+    opponentName: nameB, opponentRating: ratingB, opponentTier: tierB, opponentAvatar: avatarB, opponentTrophies: trophiesB, opponentRank: rankB
   });
   playerB.emit('gameStart', {
     ...basePayload,
-    myName: nameB, myRating: ratingB, myTier: tierB, myAvatar: avatarB,
-    opponentName: nameA, opponentRating: ratingA, opponentTier: tierA, opponentAvatar: avatarA
+    myName: nameB, myRating: ratingB, myTier: tierB, myAvatar: avatarB, myTrophies: trophiesB, myRank: rankB,
+    opponentName: nameA, opponentRating: ratingA, opponentTier: tierA, opponentAvatar: avatarA, opponentTrophies: trophiesA, opponentRank: rankA
   });
 
-  const timeoutMs = mode === 'time' ? (COUNTDOWN_MS + duration * 1000) : (COUNTDOWN_MS + WORDS_MODE_TIMEOUT_MS);
-  rooms[roomId].endTimeoutId = setTimeout(() => endGame(roomId, undefined), timeoutMs);
+  // ★ 서버가 1초 간격으로 3 -> 2 -> 1 -> START 방송
+  runServerCountdown(roomId);
 }
 
-function endGame(roomId, forcedWinnerId) {
+function endGame(roomId, forcedWinnerId, options = {}) {
   const room = rooms[roomId];
   if (!room || room.ended) return;
   room.ended = true;
   clearTimeout(room.endTimeoutId);
+  stopCountdown(room); // ★ 카운트다운 도중 종료(이탈 등)되면 틱 방송을 멈춘다
+  const reason = options.reason || null; // 'forfeit', 'cheat_detected' 등 — 클라이언트에 전달
+  const cheatReason = options.cheatReason || null;
+  const cheaterId = options.cheaterId || null;
 
   const ids = Object.keys(room.players);
   let winnerId = forcedWinnerId;
@@ -227,15 +704,26 @@ function endGame(roomId, forcedWinnerId) {
 
     if (nc1 !== nc2) {
       winnerId = nc1 > nc2 ? id1 : id2;
-    } else if (p1.percent !== p2.percent) {
-      winnerId = p1.percent > p2.percent ? id1 : id2;
     } else {
-      winnerId = null;
+      const bothFinished = p1.finished && p2.finished;
+      const oneFinished = p1.finished || p2.finished;
+
+      if (bothFinished) {
+        if (p1.finishTime !== p2.finishTime) {
+          winnerId = p1.finishTime < p2.finishTime ? id1 : id2;
+        } else {
+          winnerId = null;
+        }
+      } else if (oneFinished) {
+        winnerId = p1.finished ? id1 : id2;
+      } else {
+        winnerId = null;
+      }
     }
   }
 
   let ratingChanges = {};
-  if (room.isRanked && winnerId !== null) {
+  if (room.isRanked && !room.invalidated && winnerId !== null) {
     const loserId = ids.find(id => id !== winnerId);
     const wRating = userRatings[winnerId] || 1000;
     const lRating = userRatings[loserId] || 1000;
@@ -248,58 +736,151 @@ function endGame(roomId, forcedWinnerId) {
     ratingChanges[loserId] = { old: lRating, new: newLoserRating, diff: newLoserRating - lRating };
   }
 
+  let winnerUnlock = null;
+  if (!room.isRanked && !room.invalidated && winnerId !== null) {
+    const winnerSocket = io.sockets.sockets.get(winnerId);
+    if (winnerSocket) winnerUnlock = addNormalWin(winnerSocket);
+  }
+
+  const trophyChanges = {};
+  if (!room.invalidated) {
+    ids.forEach((id) => {
+      const res = winnerId === null ? 'draw' : (winnerId === id ? 'win' : 'lose');
+      const change = getTrophyChange(res, room.duration);
+      userTrophies[id] = Math.max(0, (userTrophies[id] || 0) + change);
+      trophyChanges[id] = { new: userTrophies[id], diff: change };
+      const playerSocketForTrophy = io.sockets.sockets.get(id);
+      if (playerSocketForTrophy) persistTrophies(playerSocketForTrophy);
+    });
+  } else {
+    console.log(`[Anti-Abuse] Match rewards invalidated: ${roomId}`);
+  }
+
+  if (room.isRanked) {
+    ids.forEach((id) => {
+      const sock = io.sockets.sockets.get(id);
+      if (sock) persistRatings(sock);
+    });
+  }
+
   ids.forEach((id) => {
-    const opponentId = ids.find((x) => x !== id);
+    const oppId = ids.find((x) => x !== id);
+    const playerSocket = io.sockets.sockets.get(id);
+    const oppSocket = io.sockets.sockets.get(oppId);
+    const oppPlayerId = oppSocket && oppSocket.data ? oppSocket.data.playerId : null;
+
     io.to(id).emit('gameOver', {
       result: winnerId === null ? 'draw' : (winnerId === id ? 'win' : 'lose'),
       myStats: room.players[id],
-      opponentStats: room.players[opponentId],
-      ratingData: room.isRanked ? ratingChanges[id] : null
+      opponentStats: room.players[oppId],
+      ratingData: room.isRanked ? ratingChanges[id] : null,
+      trophyData: trophyChanges[id],
+      unlock: playerSocket ? unlockPayload(playerSocket) : null,
+      justUnlocked: !!(winnerUnlock && winnerId === id && winnerUnlock.justUnlocked),
+      invalidated: !!room.invalidated,
+      opponentId: oppPlayerId,
+      opponentName: userNames[oppId] || 'Opponent',
+      reason: reason,
+      cheatReason: cheatReason,
+      disqualified: cheaterId === id,
+      roomId: roomId
     });
   });
+
+  // 재경기 요청을 위해 방금 끝난 매치업 정보를 잠시 보관한다 (양쪽 모두 연결 상태일 때만).
+  if (ids.every((id) => { const s = io.sockets.sockets.get(id); return s && s.connected; })) {
+    recentMatches[roomId] = { playerIds: ids.slice(), mode: room.mode, duration: room.duration, isRanked: room.isRanked };
+    setTimeout(() => { delete recentMatches[roomId]; }, RECENT_MATCH_TTL_MS);
+  }
 
   delete rooms[roomId];
 }
 
-io.on('connection', (socket) => {
-  userRatings[socket.id] = userRatings[socket.id] || 1000;
-  userNames[socket.id] = userNames[socket.id] || `Guest${Math.floor(1000 + Math.random() * 9000)}`;
-  userAvatars[socket.id] = userAvatars[socket.id] || DEFAULT_AVATAR;
+function sendInitUser(socket) {
+  const rankTag = buildRankTagForSocket(socket.id);
+  const baseName = (userNames[socket.id] || '').replace(/\[[^\]]*\]\s*/g, '').trim();
+  userNames[socket.id] = appendDynamicTag(baseName, rankTag);
   socket.emit('initUser', {
+    playerId: socket.data.playerId || null, // 클라이언트가 localStorage에 그대로 저장할 확정 ID
     rating: userRatings[socket.id],
+    trophies: userTrophies[socket.id],
     name: userNames[socket.id],
     avatar: userAvatars[socket.id],
-    allowedAvatars: ALLOWED_AVATARS
+    allowedAvatars: ALLOWED_AVATARS,
+    ...unlockPayload(socket),
+    rankTag: rankTag
   });
+}
 
-  // 프로필(닉네임/아바타) 변경 요청. 매칭 대기 중이든 평상시든 언제나 허용하되,
-  // 검증 실패한 필드는 무시하고 기존 값을 유지한다.
-  socket.on('setProfile', (data) => {
+io.on('connection', (socket) => {
+  runSeasonResets();
+
+  userRatings[socket.id] = userRatings[socket.id] || 1000;
+  userAvatars[socket.id] = userAvatars[socket.id] || DEFAULT_AVATAR;
+  userNormalWins[socket.id] = userNormalWins[socket.id] || 0;
+  userTrophies[socket.id] = userTrophies[socket.id] || 0;
+
+  userNames[socket.id] = userNames[socket.id] || 'Connecting...';
+
+  sendInitUser(socket);
+
+  // 클라이언트가 playerId를 보내면 기존 계정 데이터 복구 + 닉네임 재전송.
+  // playerId가 없거나 유효하지 않으면 서버가 새로 발급해서 클라이언트에 내려준다.
+  socket.on('identify', (data) => {
     data = data || {};
-    const newName = sanitizeNickname(data.name);
-    const newAvatar = sanitizeAvatar(data.avatar);
+    let playerId = sanitizePlayerId(data.playerId);
 
-    if (newName) userNames[socket.id] = newName;
-    if (newAvatar) userAvatars[socket.id] = newAvatar;
+    if (!playerId) {
+      playerId = generatePlayerNick(generatePlayerCode());
+    }
+    socket.data.playerId = playerId;
 
-    socket.emit('profileUpdated', {
-      name: userNames[socket.id],
-      avatar: userAvatars[socket.id],
-      nameAccepted: !!newName,
-      avatarAccepted: !!newAvatar
-    });
+    // 동일 계정 중복 접속 차단: 먼저 접속해 있던 세션을 강제 종료(Kick)한다.
+    const existingSocketId = playerIdToSocket[playerId];
+    if (existingSocketId && existingSocketId !== socket.id) {
+      const existingSocket = io.sockets.sockets.get(existingSocketId);
+      if (existingSocket && existingSocket.connected) {
+        existingSocket.emit('sessionReplaced');
+        setTimeout(() => { try { existingSocket.disconnect(true); } catch (e) {} }, 100);
+        console.log(`[Anti-Abuse] Duplicate session kicked: ${playerId}`);
+      }
+    }
+    playerIdToSocket[playerId] = socket.id;
+
+    userNormalWins[socket.id] = accountNormalWins[playerId] || 0;
+    userRatings[socket.id] = accountRatings[playerId] || userRatings[socket.id];
+    userTrophies[socket.id] = accountTrophies[playerId] || 0;
+
+    // 기존 닉네임이 있으면 복구. 없으면 playerId 자체를 표시 닉네임으로 사용한다.
+    if (accountNames[playerId]) {
+      userNames[socket.id] = accountNames[playerId];
+    } else {
+      const nick = /^Player #/i.test(playerId) ? playerId : generatePlayerNick(playerId);
+      accountNames[playerId] = nick;
+      userNames[socket.id] = nick;
+    }
+
+    // 랭킹 태그 재생성 + playerId 포함해서 클라이언트에 전달
+    sendInitUser(socket);
+    socket.emit('unlockStatus', unlockPayload(socket));
+    socket.emit('trophyUpdate', { trophies: userTrophies[socket.id] });
   });
 
   socket.on('selectMode', (data) => {
     data = data || {};
     const isRanked = !!data.isRanked;
-    const mode = data.mode === 'time' ? 'time' : 'words';
-    let duration = mode === 'time' ? (ALLOWED_TIME_DURATIONS.includes(data.duration) ? data.duration : DEFAULT_TIME_DURATION) : null;
+    const mode = 'time';
+    const duration = ALLOWED_TIME_DURATIONS.includes(data.duration) ? data.duration : DEFAULT_TIME_DURATION;
+
+    if (isRanked && !isRankedUnlocked(socket)) {
+      socket.emit('rankedLocked', unlockPayload(socket));
+      return;
+    }
 
     if (isRanked) {
       const myRating = userRatings[socket.id];
       const candidates = waitingRankedPlayers.filter(
-        p => p.socket.id !== socket.id && p.mode === mode && p.duration === duration && p.socket.connected
+        p => p.socket.id !== socket.id && p.mode === mode && p.duration === duration && p.socket.connected && !isAbusivePair(p.socket, socket)
       );
 
       if (candidates.length > 0) {
@@ -309,19 +890,33 @@ io.on('connection', (socket) => {
         if (idx > -1) waitingRankedPlayers.splice(idx, 1);
 
         startMatch(bestMatch.socket, socket, mode, duration, true);
+        clearPracticeSession(socket.id);
+        clearPracticeSession(bestMatch.socket.id);
       } else {
         waitingRankedPlayers.push({ socket, rating: myRating, mode, duration });
         socket.emit('waiting', { isRanked: true });
       }
     } else {
-      const matchKey = mode === 'time' ? `time_${duration}` : 'words';
-      const opponent = waitingNormalPlayers[matchKey];
+      const matchKey = `time_${duration}`;
+      const queue = Array.isArray(waitingNormalPlayers[matchKey])
+        ? waitingNormalPlayers[matchKey]
+        : (waitingNormalPlayers[matchKey] = []);
 
-      if (opponent && opponent.connected && opponent.id !== socket.id) {
-        delete waitingNormalPlayers[matchKey];
+      for (let i = queue.length - 1; i >= 0; i--) {
+        if (!queue[i].connected) queue.splice(i, 1);
+      }
+
+      const oppIdx = queue.findIndex(
+        (s) => s.connected && s.id !== socket.id && !isAbusivePair(s, socket)
+      );
+
+      if (oppIdx > -1) {
+        const [opponent] = queue.splice(oppIdx, 1);
         startMatch(opponent, socket, mode, duration, false);
+        clearPracticeSession(socket.id);
+        clearPracticeSession(opponent.id);
       } else {
-        waitingNormalPlayers[matchKey] = socket;
+        queue.push(socket);
         socket.emit('waiting', { isRanked: false });
       }
     }
@@ -330,8 +925,10 @@ io.on('connection', (socket) => {
   socket.on('progress', (data) => {
     const room = rooms[socket.data.roomId];
     if (!room || room.ended) return;
+    // ★ START 신호 전에 들어온 입력은 무시한다 (카운트다운 중 선입력/조작 방지)
+    if (!room.started) return;
     const player = room.players[socket.id];
-    if (!player || player.finished) return;
+    if (!player || player.finished || player.disqualified) return;
 
     const { accuracy, charIndex, netCorrect, totalTyped, totalErrors } = sanitizeStat(data || {}, room.text.length);
 
@@ -345,55 +942,338 @@ io.on('connection', (socket) => {
     player.netCorrect = netCorrect;
     player.totalTyped = totalTyped;
     player.totalErrors = totalErrors;
+    // accuracy는 서버에서 총입력/누적오류 기반으로 재계산 (오타 1회면 영구 100% 불가 반영)
     player.accuracy = totalTyped > 0
       ? Math.max(0, Math.round(((totalTyped - totalErrors) / totalTyped) * 100))
       : 100;
 
+    // --- Anti-Cheat 검증 ---
+    // 클라이언트가 보낸 keystroke 간격 배치를 반영한 뒤 매크로/정속 패턴과 지속 최고속도를 검사한다.
+    // 위반 감지 시 그 즉시 이 판을 종료하고 해당 플레이어를 몰수패 처리한다.
+    recordAntiCheatDeltas(player, (data && data.deltas) || []);
+    const cheatReason = detectMacroPattern(player) || detectSpeedLimit(player, room);
+    if (cheatReason) {
+      player.disqualified = true;
+      disqualifyPlayer(socket.data.roomId, socket.id, cheatReason);
+      return;
+    }
+
+    // 100% 완주 시 자동으로 playerFinished 처리
+
+    if (percent >= 100 && !player.finished) {
+      player.finished = true;
+      player.finishTime = Date.now();
+      socket.to(socket.data.roomId).emit('opponentProgress', {
+        percent: player.percent, accuracy: player.accuracy,
+        charIndex: player.charIndex,
+        netCorrect: player.netCorrect, totalTyped: player.totalTyped, totalErrors: player.totalErrors
+      });
+      endGame(socket.data.roomId, socket.id);
+      return;
+    }
+
     socket.to(socket.data.roomId).emit('opponentProgress', {
-      percent: player.percent, accuracy: player.accuracy, charIndex: player.charIndex,
+      percent: player.percent, accuracy: player.accuracy,
+      charIndex: player.charIndex,
       netCorrect: player.netCorrect, totalTyped: player.totalTyped, totalErrors: player.totalErrors
     });
   });
 
-  // 완주 처리: 클라이언트가 finish 이벤트를 보내면 즉시 게임을 종료한다.
-  socket.on('playerFinished', (data) => {
-    const room = rooms[socket.data.roomId];
-    if (!room || room.ended) return;
-    const player = room.players[socket.id];
-    if (!player || player.finished) return;
-
-    const { accuracy, charIndex, netCorrect, totalTyped, totalErrors } = sanitizeStat(data || {}, room.text.length);
-
-    player.finished = true;
-    player.percent = 100;
-    player.charIndex = room.text.length;
-    player.netCorrect = netCorrect;
-    player.totalTyped = totalTyped;
-    player.totalErrors = totalErrors;
-    player.accuracy = totalTyped > 0
-      ? Math.max(0, Math.round(((totalTyped - totalErrors) / totalTyped) * 100))
-      : 100;
-
-    endGame(socket.data.roomId, socket.id);
+  socket.on('createRoom', (data) => {
+    data = data || {};
+    const mode = 'time';
+    const duration = ALLOWED_TIME_DURATIONS.includes(data.duration) ? data.duration : DEFAULT_TIME_DURATION;
+    let code;
+    do { code = generateRoomCode(); } while (customRooms[code]);
+    customRooms[code] = { mode, duration, isRanked: false, players: [socket] };
+    socket.join(code);
+    socket.data.customRoomCode = code;
+    socket.emit('roomCreated', { code, mode, duration });
   });
 
-  // 매칭 대기 중 사용자가 취소를 누르면 대기열에서만 제거한다.
-  // 이미 매칭이 성사되어 방이 생성된 이후라면(gameStart 발송됨) 취소는 무시된다 —
-  // 이 경우 클라이언트는 곧 도착하는 gameStart 이벤트로 자연스럽게 게임 화면으로 전환된다.
-  socket.on('cancelSearch', () => {
-    removeFromWaitingQueues(socket);
+  socket.on('joinRoom', (data) => {
+    data = data || {};
+    const code = (data.code || '').toUpperCase().trim();
+    if (!code || !customRooms[code]) {
+      socket.emit('roomError', { message: 'Invalid room code.' });
+      return;
+    }
+    const room = customRooms[code];
+    if (room.players.length >= 2) {
+      socket.emit('roomError', { message: 'Room is full.' });
+      return;
+    }
+    const hostSocket = room.players[0];
+    if (hostSocket && hostSocket.data.playerId && hostSocket.data.playerId === socket.data.playerId) {
+      socket.emit('roomError', { message: 'You cannot join your own room.' });
+      return;
+    }
+    room.players.push(socket);
+    socket.join(code);
+    socket.data.customRoomCode = code;
+    socket.emit('roomJoined', { code });
+    room.players[0].emit('roomOpponentJoined');
+
+    // ★ 커스텀룸도 일반 매치와 동일하게 서버 주도 카운트다운(countdownTick)을 사용한다.
+    //   기존처럼 3초를 별도로 기다린 뒤 startMatch를 호출하면 카운트다운이 이중(3초 + 3초)이 되므로,
+    //   여기서는 화면 전환 신호만 보내고 즉시 매치를 시작한다.
+    io.to(code).emit('customRoomCountdown', { seconds: COUNTDOWN_SECONDS });
+
+    const [host, guest] = customRooms[code].players;
+    delete customRooms[code];
+    startMatch(host, guest, room.mode, room.duration, room.isRanked, code);
+  });
+
+  socket.on('cancelRoom', () => {
+    const code = socket.data.customRoomCode;
+    if (code && customRooms[code]) {
+      const room = customRooms[code];
+      room.players = room.players.filter(p => p.id !== socket.id);
+      if (room.players.length === 0) {
+        delete customRooms[code];
+      } else {
+        room.players[0].emit('roomError', { message: 'Opponent left the room.' });
+      }
+    }
+    socket.data.customRoomCode = null;
+  });
+
+  socket.on('requestLeaderboard', (data) => {
+    data = data || {};
+    const sortBy = data.sortBy || 'rank';
+
+    const rankSortKind = sortBy === 'trophy' ? 'trophy' : 'rating';
+    const topList = buildTopRankList(rankSortKind); // ★ 계정 단위로 정렬된 리스트를 그대로 재사용
+
+    const myId = socket.data && socket.data.playerId;
+    const entries = topList.map((entry) => ({
+      playerId: entry.playerId,
+      name: accountNames[entry.playerId] || entry.playerId || 'Guest',
+      avatar: DEFAULT_AVATAR,
+      rating: entry.rating,
+      trophies: entry.trophies,
+      isMe: entry.playerId === myId
+    }));
+
+    // 내 계정이 상위 100위 밖이라 리스트에 없다면 별도로 채워서 내려준다(기존 동작 유지).
+    if (myId && !entries.some((e) => e.playerId === myId)) {
+      entries.push({
+        playerId: myId,
+        name: userNames[socket.id] || 'Guest',
+        avatar: userAvatars[socket.id] || DEFAULT_AVATAR,
+        rating: userRatings[socket.id] || 1000,
+        trophies: accountMonthlyTrophies[myId] || userTrophies[socket.id] || 0,
+        isMe: true
+      });
+    }
+
+    socket.emit('leaderboardData', { sortBy, entries: entries.slice(0, 50) });
+  });
+
+  socket.on('report_player', (data) => {
+    data = data || {};
+    const reporterId = socket.data && socket.data.playerId;
+    const targetId = data.targetPlayerId;
+    const roomId = data.roomId;
+    const reason = data.reason;
+
+    if (!reporterId || !targetId || !roomId || !reason) {
+      socket.emit('reportResult', { success: false, message: 'Missing required fields.' });
+      return;
+    }
+
+    if (reporterId === targetId) {
+      socket.emit('reportResult', { success: false, message: 'You cannot report yourself.' });
+      return;
+    }
+
+    if (!reportedInMatch[roomId]) reportedInMatch[roomId] = new Set();
+    if (reportedInMatch[roomId].has(reporterId)) {
+      socket.emit('reportResult', { success: false, message: 'You already reported in this match.' });
+      return;
+    }
+    reportedInMatch[roomId].add(reporterId);
+
+    const validReasons = ['cheating', 'inappropriate_name', 'other'];
+    const cleanReason = validReasons.includes(reason) ? reason : 'other';
+
+    let targetName = 'Unknown';
+    for (const [sid, s] of io.sockets.sockets) {
+      if (s.data && s.data.playerId === targetId) {
+        targetName = userNames[sid] || 'Unknown';
+        break;
+      }
+    }
+
+    const reportEntry = {
+      timestamp: new Date().toISOString(),
+      reporterId,
+      reporterName: userNames[socket.id] || 'Unknown',
+      targetId,
+      targetName,
+      roomId,
+      reason: cleanReason,
+      matchStats: data.matchStats || {}
+    };
+
+    reportLogs.push(reportEntry);
+    console.log(`[Report] ${reportEntry.reporterName}(${reporterId}) reported ${reportEntry.targetName}(${targetId}) for "${cleanReason}" in room ${roomId}`);
+
+    sendDiscordReportWebhook(reportEntry);
+
+    socket.emit('reportResult', { success: true, message: 'Report submitted. Thank you!' });
+  });
+
+  socket.on('requestSoloPractice', () => {
+    const text = generateUniqueText('practice', PRACTICE_TEXT_DURATION, socket.data.lastText || '');
+    socket.data.lastText = text;
+    soloPracticeSessions[socket.id] = { text };
+    socket.emit('soloPracticeStart', { text });
+  });
+
+  socket.on('requestPracticeText', () => {
+    const session = soloPracticeSessions[socket.id];
+    if (!session) return;
+    const text = generateUniqueText('practice', PRACTICE_TEXT_DURATION, session.text);
+    session.text = text;
+    socket.data.lastText = text;
+    socket.emit('practiceText', { text });
+  });
+
+  socket.on('exitPractice', () => {
+    clearPracticeSession(socket.id);
+    socket.emit('practiceEnded');
+  });
+
+  socket.on('leaveMatch', () => {
+    const roomId = socket.data.roomId;
+    const room = rooms[roomId];
+    if (!room || room.ended) return;
+    const remainingId = Object.keys(room.players).find((id) => id !== socket.id);
+    if (!remainingId) return;
+    endGame(roomId, remainingId, { reason: 'forfeit' });
+  });
+
+  // --- 재경기(Rematch) ---
+  socket.on('requestRematch', (data) => {
+    data = data || {};
+    const roomId = data.roomId;
+    const match = recentMatches[roomId];
+    if (!match || !match.playerIds.includes(socket.id)) {
+      socket.emit('rematchError', { message: 'Match no longer available for rematch.' });
+      return;
+    }
+    const oppId = match.playerIds.find((id) => id !== socket.id);
+    const oppSocket = oppId ? io.sockets.sockets.get(oppId) : null;
+    if (!oppSocket || !oppSocket.connected) {
+      socket.emit('rematchError', { message: 'Opponent is no longer available.' });
+      cleanupPendingRematch(roomId);
+      delete recentMatches[roomId];
+      return;
+    }
+
+    let pending = pendingRematches[roomId];
+    if (!pending) {
+      pending = pendingRematches[roomId] = {
+        accepted: new Set(),
+        timeoutId: setTimeout(() => {
+          match.playerIds.forEach((id) => {
+            const s = io.sockets.sockets.get(id);
+            if (s) s.emit('rematchTimeout');
+          });
+          cleanupPendingRematch(roomId);
+          delete recentMatches[roomId];
+        }, REMATCH_TIMEOUT_MS)
+      };
+    }
+
+    const alreadyRequestedByOpp = pending.accepted.has(oppSocket.id);
+    pending.accepted.add(socket.id);
+
+    if (!alreadyRequestedByOpp) {
+      oppSocket.emit('rematchRequested', { roomId });
+    }
+
+    if (pending.accepted.size === 2) {
+      clearTimeout(pending.timeoutId);
+      delete pendingRematches[roomId];
+      delete recentMatches[roomId];
+      const p1 = io.sockets.sockets.get(match.playerIds[0]);
+      const p2 = io.sockets.sockets.get(match.playerIds[1]);
+      if (p1 && p1.connected && p2 && p2.connected) {
+        startMatch(p1, p2, match.mode, match.duration, match.isRanked);
+      } else {
+        match.playerIds.forEach((id) => {
+          const s = io.sockets.sockets.get(id);
+          if (s) s.emit('rematchError', { message: 'Opponent disconnected.' });
+        });
+      }
+    }
+  });
+
+  socket.on('declineRematch', (data) => {
+    data = data || {};
+    const roomId = data.roomId;
+    const match = recentMatches[roomId];
+    if (!match || !match.playerIds.includes(socket.id)) return;
+    const oppId = match.playerIds.find((id) => id !== socket.id);
+    const oppSocket = oppId ? io.sockets.sockets.get(oppId) : null;
+    if (oppSocket) oppSocket.emit('rematchDeclined');
+    cleanupPendingRematch(roomId);
+    delete recentMatches[roomId];
   });
 
   socket.on('disconnect', () => {
     removeFromWaitingQueues(socket);
+    clearPracticeSession(socket.id);
 
-    const room = rooms[socket.data.roomId];
-    if (room && !room.ended) {
-      room.ended = true;
-      clearTimeout(room.endTimeoutId);
-      socket.to(socket.data.roomId).emit('opponentLeft');
-      delete rooms[socket.data.roomId];
+    const myPid = socket.data.playerId;
+    if (myPid && playerIdToSocket[myPid] === socket.id) delete playerIdToSocket[myPid];
+
+    // 재경기 대기/제안 중이었다면 상대에게 알리고 정리한다.
+    for (const [rid, match] of Object.entries(recentMatches)) {
+      if (match.playerIds.includes(socket.id)) {
+        const oppId = match.playerIds.find((id) => id !== socket.id);
+        const oppSocket = oppId ? io.sockets.sockets.get(oppId) : null;
+        if (oppSocket) oppSocket.emit('rematchDeclined');
+        cleanupPendingRematch(rid);
+        delete recentMatches[rid];
+      }
     }
+
+    const cCode = socket.data.customRoomCode;
+    if (cCode && customRooms[cCode]) {
+      customRooms[cCode].players = customRooms[cCode].players.filter((p) => p.id !== socket.id);
+      if (customRooms[cCode].players.length === 0) delete customRooms[cCode];
+      else customRooms[cCode].players[0].emit('roomError', { message: 'Opponent left the room.' });
+    }
+
+    const roomId = socket.data.roomId;
+    const room = rooms[roomId];
+    if (room && !room.ended) {
+      const remainingId = Object.keys(room.players).find((id) => id !== socket.id);
+      if (remainingId) {
+        // 남은 플레이어에게 몰수승(forfeit win) 처리.
+        // endGame을 그대로 재사용해서 랭크전 MMR, 트로피, 일반전 승수까지
+        // 정상 경기 종료와 완전히 동일한 경로로 정산한다. (카운트다운 타이머도 endGame에서 정리됨)
+        endGame(roomId, remainingId, { reason: 'forfeit' });
+      } else {
+        clearTimeout(room.endTimeoutId);
+        stopCountdown(room);
+        delete rooms[roomId];
+      }
+    }
+
+    // ★ 소켓 기준으로 남아있던 임시 랭킹 데이터(userRatings 등)는 계정(playerId)에
+    //   이미 persist* 함수들을 통해 저장되어 있으므로, 소켓 자체 항목은 정리한다.
+    //   (정리하지 않으면 접속 종료된 유령 소켓 항목이 buildTopRankList의
+    //    "현재 접속 중" 루프에는 더 이상 잡히지 않지만, 메모리에 무한히
+    //    쌓이는 것을 막기 위해 명시적으로 삭제한다.)
+    delete userRatings[socket.id];
+    delete userNames[socket.id];
+    delete userAvatars[socket.id];
+    delete userNormalWins[socket.id];
+    delete userTrophies[socket.id];
   });
 });
 

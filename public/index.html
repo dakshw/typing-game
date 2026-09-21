@@ -457,6 +457,7 @@
     const LINE_HEIGHT = 38;
 
     // 실전 모드(서버)와 동일한 텍스트 생성 로직을 클라이언트에 이식 (연습모드용)
+    // ★ 단어 풀: 총 300개 (중복 없음). server.js의 timeModeWordPool 배열과 반드시 동일해야 한다.
     const timeModeWordPool = [
       "the", "be", "to", "of", "and", "a", "in", "that", "have", "it",
       "for", "not", "on", "with", "he", "as", "you", "do", "at", "this",
@@ -468,8 +469,32 @@
       "then", "now", "look", "only", "come", "its", "over", "think", "also", "back",
       "after", "use", "two", "how", "our", "work", "first", "well", "way", "even",
       "new", "want", "because", "any", "these", "give", "day", "most", "us", "code",
-      "program", "system", "run", "fast", "type", "keyboard", "match", "win", "play", "speed"
+      "program", "system", "run", "fast", "type", "keyboard", "match", "win", "play", "speed",
+      "man", "find", "here", "thing", "tell", "many", "very", "through", "should", "call",
+      "world", "school", "still", "try", "last", "ask", "need", "too", "feel", "three",
+      "state", "never", "become", "between", "high", "really", "something", "another", "family", "own",
+      "leave", "put", "old", "while", "mean", "keep", "student", "why", "let", "great",
+      "same", "big", "group", "begin", "seem", "country", "help", "talk", "turn", "problem",
+      "every", "start", "hand", "might", "show", "part", "against", "place", "such", "again",
+      "few", "case", "week", "company", "where", "must", "right", "study", "book", "eye",
+      "job", "word", "though", "business", "issue", "side", "kind", "four", "head", "far",
+      "black", "long", "both", "little", "house", "since", "provide", "service", "around", "friend",
+      "important", "father", "sit", "away", "until", "power", "hour", "game", "often", "yet",
+      "line", "end", "among", "ever", "stand", "bad", "lose", "however", "member", "pay",
+      "law", "meet", "car", "city", "almost", "include", "continue", "set", "later", "community",
+      "much", "name", "five", "once", "white", "least", "learn", "real", "change", "team",
+      "minute", "best", "several", "idea", "body", "information", "nothing", "lead", "social", "understand",
+      "whether", "watch", "together", "follow", "parent", "stop", "face", "anything", "create", "public",
+      "already", "speak", "others", "read", "level", "allow", "add", "office", "spend", "door",
+      "health", "person", "art", "sure", "history", "within", "grow", "result", "open", "morning",
+      "walk", "reason", "low", "research", "early", "food", "before", "moment", "himself", "air",
+      "teacher", "force", "offer", "enough", "education", "across", "although", "remember", "foot", "second"
     ];
+
+    // 안전장치: 단어 풀이 300개가 아니거나 중복이 있으면 콘솔에 경고한다.
+    if (timeModeWordPool.length !== 300 || new Set(timeModeWordPool).size !== timeModeWordPool.length) {
+      console.warn('[WordPool] 경고: 단어 수=' + timeModeWordPool.length + ', 고유 단어 수=' + new Set(timeModeWordPool).size + ' (300개/중복 없음이어야 함)');
+    }
 
     function isEasyTransition(prevWord, nextWord) {
       if (!prevWord) return false;
