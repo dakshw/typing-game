@@ -743,7 +743,12 @@ function endGame(roomId, forcedWinnerId, options = {}) {
   }
 
   const trophyChanges = {};
-  if (!room.invalidated) {
+  if (!room.isRanked) {
+    // ★ Casual(일반 매치 / 커스텀 룸): 승패와 무관하게 트로피·MMR 변동 없음 (diff 0)
+    ids.forEach((id) => {
+      trophyChanges[id] = { new: userTrophies[id] || 0, diff: 0 };
+    });
+  } else if (!room.invalidated) {
     ids.forEach((id) => {
       const res = winnerId === null ? 'draw' : (winnerId === id ? 'win' : 'lose');
       const change = getTrophyChange(res, room.duration);
