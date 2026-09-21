@@ -1360,12 +1360,94 @@
       setText('accuracy', computeAccuracy());
     }
 
-    function onTypingInput(e) {
+    // ★ 입력 판정 방식 (IME 무관)
+    //   기존: hidden input의 value를 그대로 읽어 원문과 비교했다.
+    //         한글 IME가 켜져 있으면 영문 키가 'ㅅ', 'ㅙ' 같은 한글로 조합되어
+    //         전부 오타로 판정되고(공백만 정답) Accuracy가 20%대로 폭락했다.
+    //   수정: keydown의 "물리 키(e.code)"로 영문 글자를 직접 확정해 자체 버퍼(prevVal)에 쌓고,
+    //         입력창 value는 판정에 사용하지 않는다. (가상 키보드처럼 e.code가 없는 환경만 input 이벤트로 보조 처리)
+    let physicalKeyboardSeen = false;
+
+    function keyEventToChar(e) {
+      const code = e.code || '';
+      const letter = code.match(/^Key([A-Z])$/);
+      if (letter) {
+        const caps = !!(e.getModifierState && e.getModifierState('CapsLock'));
+        const upper = !!e.shiftKey !== caps;
+        return upper ? letter[1] : letter[1].toLowerCase();
+      }
+      if (code === 'Space') return ' ';
+      const digit = code.match(/^Digit([0-9])$/);
+      if (digit && !e.shiftKey) return digit[1];
+      if (e.key && e.key.length === 1 && !e.isComposing && e.keyCode !== 229) return e.key;
+      return null;
+    }
+
+    function canAcceptTyping() {
+      const ti = el('typingInput');
+      if (!ti || ti.disabled || gameEnded) return false;
+      if (!(inGame || practice.active) || typingLocked) return false;
+      return true;
+    }
+
+    function onTypingKeyDown(e) {
+      if (e.code && e.code !== 'Unidentified') physicalKeyboardSeen = true;
+      if (!canAcceptTyping()) return;
+      if (e.ctrlKey || e.metaKey || e.altKey) {
+        if (e.key === 'Backspace') e.preventDefault();
+        return;
+      }
+      if (e.key === 'Backspace') {
+        e.preventDefault();
+        if (prevVal.length > 0) applyTypedValue(prevVal.slice(0, -1));
+        return;
+      }
+      const ch = keyEventToChar(e);
+      if (ch === null) return;
+      e.preventDefault();
+      if (prevVal.length >= sampleText.length) return;
+      applyTypedValue(prevVal + ch);
+    }
+
+    function appendAsciiChars(data) {
+      for (const ch of String(data || '')) {
+        if (!canAcceptTyping()) break;
+        if (!/^[\x20-\x7E]$/.test(ch)) continue;
+        if (prevVal.length >= sampleText.length) break;
+        applyTypedValue(prevVal + ch);
+      }
+    }
+
+    // 보조 경로: 물리 키보드(e.code)가 확인된 환경에서는 사용하지 않는다 (이중 집계 방지).
+    function onTypingFallbackInput(e) {
+      const ti = e.target;
+      if (!ti) return;
+      if (physicalKeyboardSeen || e.isComposing) { if (!e.isComposing) ti.value = ''; return; }
+      if (canAcceptTyping()) {
+        const type = e.inputType || '';
+        if (type === 'deleteContentBackward') {
+          if (prevVal.length > 0) applyTypedValue(prevVal.slice(0, -1));
+        } else if (type === 'insertText' && e.data) {
+          appendAsciiChars(e.data);
+        }
+      }
+      ti.value = '';
+    }
+
+    function onTypingCompositionEnd(e) {
+      const ti = e.target;
+      if (!physicalKeyboardSeen && canAcceptTyping() && /^[\x20-\x7E]+$/.test(e.data || '')) {
+        appendAsciiChars(e.data);
+      }
+      if (ti) ti.value = '';
+    }
+
+    // 원문(sampleText)과 사용자가 입력한 문자열(value)을 비교해 화면/통계/서버 전송을 갱신한다.
+    function applyTypedValue(value) {
       if (gameEnded) return;
       const ti = el('typingInput');
-      if (!ti || e.target !== ti || ti.disabled) return;
+      if (!ti || ti.disabled) return;
 
-      const value = ti.value;
       const prev = prevVal;
 
       // 새로 입력된 글자만 집계 (백스페이스 구간은 집계하지 않음)
@@ -1374,6 +1456,7 @@
         if (value[i] !== sampleText[i]) totalErrors++;
       }
       prevVal = value;
+      ti.value = '';
 
       paintTypedChars(value);
       positionCaret(myCaretEl, value.length);
@@ -1413,7 +1496,9 @@
           if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End'].includes(e.key)) e.preventDefault();
         }, true);
       }
-      on('typingInput', 'input', onTypingInput);
+      on('typingInput', 'keydown', onTypingKeyDown);
+      on('typingInput', 'input', onTypingFallbackInput);
+      on('typingInput', 'compositionend', onTypingCompositionEnd);
 
       // ★ 포커스 자동 이동 (1): 문장 영역 클릭
       on('quoteViewport', 'click', focusTypingInput);
@@ -1427,7 +1512,7 @@
       document.addEventListener('keydown', (e) => {
         if (!(inGame || practice.active) || gameEnded || typingLocked) return;
         if (e.ctrlKey || e.metaKey || e.altKey) return;
-        if (!e.key || e.key.length !== 1) return;
+        if (!e.key || (e.key.length !== 1 && e.key !== 'Process')) return;
         const ti = el('typingInput');
         if (!ti || ti.disabled || document.activeElement === ti) return;
         const modal = el('reportModalOverlay');
@@ -1435,6 +1520,7 @@
         const ae = document.activeElement;
         if (ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA')) return;
         ti.focus();
+        onTypingKeyDown(e);   // 포커스를 옮기는 이 키 입력도 놓치지 않고 바로 판정한다
       });
 
       // 탭 전환 / 창 포커스 복귀 시에도 즉시 상태 점검
