@@ -1,1892 +1,1291 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <script src="/socket.io/socket.io.js"></script>
-  <meta charset="UTF-8">
-  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
-  <meta http-equiv="Pragma" content="no-cache">
-  <meta http-equiv="Expires" content="0">
-  <title>Speed Typing Test - 1v1 Multi</title>
-  <style>
-    :root { --mt-yellow: #e2b714; --line-height: 38px; }
-    body { font-family: sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; background: #121212; color: #fff; margin: 0; }
-    .container { width: 640px; text-align: center; }
+const express = require('express');
+const http = require('http');
+const { Server } = require('socket.io');
+const path = require('path');
 
-    .tab-row { display: flex; justify-content: center; gap: 10px; margin-bottom: 12px; }
-    .tab-btn { padding: 10px 24px; font-weight: bold; background: #222; border: 1px solid #444; color: #aaa; border-radius: 20px; cursor: pointer; }
-    .tab-btn.active { background: #333; color: var(--mt-yellow); border-color: var(--mt-yellow); }
-    .tab-btn.locked { opacity: 0.55; cursor: not-allowed; position: relative; }
-    .tab-btn.locked.active { background: #222; color: #aaa; border-color: #444; }
-    .tab-btn .lock-label { display: none; font-size: 0.72rem; font-weight: normal; color: #888; margin-top: 3px; }
-    .tab-btn.locked .lock-label { display: block; }
+const app = express();
+const server = http.createServer(app);
+const io = new Server(server, { cors: { origin: '*' } });
 
-    .unlock-panel { width: 100%; max-width: 420px; margin: 0 auto 16px; padding: 10px 14px; background: #1c1c1c; border: 1px solid #333; border-radius: 10px; text-align: left; }
-    .unlock-panel.hidden { display: none; }
-    .unlock-panel-head { display: flex; justify-content: space-between; align-items: center; font-size: 0.82rem; color: #aaa; margin-bottom: 8px; }
-    .unlock-panel-head strong { color: var(--mt-yellow); }
-    .unlock-bar-bg { width: 100%; height: 10px; background: #333; border-radius: 6px; overflow: hidden; }
-    .unlock-bar-fill { height: 100%; width: 0%; background: var(--mt-yellow); transition: width 0.2s ease-out; }
-    .unlock-done { color: #4caf50; font-size: 0.82rem; font-weight: bold; text-align: center; }
+const PORT = process.env.PORT || 3000;
+app.use(express.static(path.join(__dirname, 'public')));
 
-    .user-info { margin-bottom: 15px; font-size: 1.1rem; color: #ccc; }
-    .user-info span { color: var(--mt-yellow); font-weight: bold; }
+function getTrophyChange(result, duration, isRanked) {
+  // ★ Casual(일반 매치 / 커스텀 룸)은 승패와 무관하게 항상 0
+  if (!isRanked) return 0;
+  const base = result === 'win' ? 10 : result === 'lose' ? -3 : 0;
+  const multiplier = duration === 30 ? 0.8 : duration === 120 ? 1.5 : 1.0;
+  return Math.round(base * multiplier);
+}
 
-    .btn-restart { display: inline-block; margin-top: 20px; padding: 10px 20px; font-size: 1rem; background: #4caf50; color: #fff; border: none; border-radius: 5px; cursor: pointer; }
-    .btn-restart:hover { background: #45a049; }
-    .btn-secondary { background: transparent; border: 1px solid #555; color: #aaa; padding: 8px 14px; font-size: 0.85rem; margin-left: 10px; }
-    .btn-secondary:hover { background: #222; border-color: #777; }
+// --- Season / Trophy Reset System ---
+const SEASON_SOFT_RESET_RATIO = 0.5;
+const SEASON_SOFT_RESET_FLOOR = 500;
 
-    .btn-leave-match { opacity: 0.3; font-size: 11px; padding: 4px 8px; transition: opacity 0.15s ease; }
-    .btn-leave-match:hover { opacity: 1.0; }
-    .restart-row { display: none; margin-top: 20px; }
+const seasonState = {
+  lastMmrResetMonth: null,
+  lastTrophyResetMonth: null
+};
 
-    .mode-select { display: flex; flex-direction: column; align-items: center; gap: 14px; margin-top: 10px; }
-    .mode-buttons { display: flex; gap: 16px; }
-    .btn-mode { padding: 16px 28px; font-size: 1.05rem; background: #1c1c1c; border: 2px solid #444; color: #fff; border-radius: 10px; cursor: pointer; transition: border-color 0.15s, transform 0.15s; }
-    .btn-mode:hover { border-color: #2196f3; transform: translateY(-2px); }
-    .btn-mode .mode-title { font-weight: bold; font-size: 1.15rem; display: block; margin-bottom: 4px; }
-    .btn-mode .mode-desc { font-size: 0.8rem; color: #999; }
+const accountPreResetRatings = {};
+const accountMonthlyTrophies = {};
 
-    .duration-select { display: none; flex-direction: column; align-items: center; gap: 10px; }
-    .duration-buttons { display: flex; gap: 12px; }
-    .btn-duration { padding: 14px 22px; font-size: 1.05rem; font-weight: bold; background: #1c1c1c; border: 2px solid #444; color: #fff; border-radius: 10px; cursor: pointer; }
-    .btn-duration:hover { border-color: #2196f3; }
-    .btn-back { margin-top: 4px; background: none; border: none; color: #888; font-size: 0.85rem; cursor: pointer; text-decoration: underline; }
+function getCurrentMonth() {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+}
 
-    .game-area { display: none; }
-    .type-area { position: relative; }
+function softResetMMR(mmr) {
+  return Math.round(mmr * SEASON_SOFT_RESET_RATIO + SEASON_SOFT_RESET_FLOOR);
+}
 
-    .quote-viewport { position: relative; height: calc(var(--line-height) * 3); overflow: hidden; margin-bottom: 6px; text-align: left; cursor: text; }
-    .quote-display { position: relative; line-height: var(--line-height); font-size: 1.4rem; letter-spacing: 0.5px; color: #646669; transition: transform 0.25s ease; word-break: keep-all; }
-    .quote-display span.char { position: relative; }
-    .correct { color: #d1d0c5; }
-    .incorrect { color: #ca4754; text-decoration: underline; }
+function runSeasonResets() {
+  const currentMonth = getCurrentMonth();
 
-    .caret { position: absolute; top: 3px; left: 0; width: 2px; height: 32px; background: var(--mt-yellow); border-radius: 1px; transition: transform 0.08s ease; pointer-events: none; display: none; }
-
-    .hidden-input { position: absolute; top: 0; left: 0; width: 1px; height: 1px; opacity: 0; }
-    .type-hint { font-size: 0.8rem; color: #666; margin-bottom: 12px; }
-    .status-message { margin-top: 10px; font-size: 1rem; color: #ffca28; min-height: 20px; }
-
-    .mode-badge { display: inline-block; margin-top: 6px; padding: 4px 10px; font-size: 0.8rem; background: #263238; border-radius: 12px; color: #80cbc4; }
-    .stats { display: flex; justify-content: space-around; margin-top: 4px; font-size: 1.2rem; }
-
-    .caret.opp-caret { background: #2196f3; }
-
-    .result-banner { text-align: left; }
-    .dashboard { display: none; text-align: left; padding: 14px 4px 4px; }
-    .dashboard.show { display: block; }
-    .dash-result-tag { font-size: 1.3rem; font-weight: bold; margin-bottom: 14px; }
-    .dash-result-tag.win { color: #4caf50; }
-    .dash-result-tag.lose { color: #ca4754; }
-    .dash-result-tag.draw { color: #ffca28; }
-    .rating-change { font-size: 1.1rem; margin-top: 8px; font-weight: bold; color: #2196f3; }
-
-    .dash-main { display: flex; gap: 40px; margin-bottom: 14px; }
-    .dash-primary .dash-value { font-size: 3rem; font-weight: bold; color: var(--mt-yellow); line-height: 1; }
-    .dash-primary .dash-label { font-size: 0.85rem; color: #888; text-transform: uppercase; }
-
-    .dash-compare { display: flex; gap: 16px; margin-top: 16px; }
-    .dash-col { flex: 1; background: #1c1c1c; border: 1px solid #333; border-radius: 10px; padding: 14px 16px; }
-    .dash-col.me { border-color: var(--mt-yellow); }
-    .dash-col.opp { border-color: #2196f3; }
-    .dash-col h4 { margin: 0 0 10px; font-size: 0.8rem; letter-spacing: 0.5px; text-transform: uppercase; color: #999; }
-    .dash-col.me h4 { color: var(--mt-yellow); }
-    .dash-col.opp h4 { color: #2196f3; }
-    .dash-stat-row { display: flex; justify-content: space-between; padding: 5px 0; font-size: 0.95rem; border-bottom: 1px solid #2a2a2a; }
-    .dash-stat-row:last-child { border-bottom: none; }
-    .dash-stat-row .k { color: #888; }
-    .dash-stat-row .v { color: #fff; font-weight: bold; }
-
-    .matchup-bar { display: flex; align-items: center; justify-content: space-between; gap: 10px; background: #1a1a1a; border: 1px solid #333; border-radius: 10px; padding: 14px 18px; margin-bottom: 14px; opacity: 1; max-height: 100px; overflow: hidden; transition: opacity 0.35s ease, max-height 0.35s ease, padding 0.35s ease, margin 0.35s ease, border-width 0.35s ease; }
-    .matchup-bar.hidden-state { opacity: 0; max-height: 0; padding-top: 0; padding-bottom: 0; margin-bottom: 0; border-width: 0; pointer-events: none; }
-    .matchup-player { flex: 1; display: flex; align-items: center; gap: 10px; min-width: 0; }
-    .matchup-player.opponent { flex-direction: row-reverse; text-align: right; }
-    .matchup-avatar { flex-shrink: 0; width: 44px; height: 44px; border-radius: 50%; background: #262626; border: 2px solid #555; display: flex; align-items: center; justify-content: center; font-weight: bold; font-size: 1.15rem; color: #fff; }
-    .matchup-info { min-width: 0; }
-    .matchup-info .player-name { font-weight: bold; font-size: 0.95rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    .matchup-info .tier-badge { display: inline-flex; align-items: center; gap: 4px; font-size: 0.72rem; font-weight: bold; padding: 2px 9px; border-radius: 10px; margin-top: 4px; border: 1px solid; white-space: nowrap; }
-    .matchup-vs { flex-shrink: 0; font-weight: bold; color: #555; font-size: 0.85rem; padding: 0 6px; }
-
-    .rank-badge {
-      display: inline-block;
-      font-weight: 800;
-      font-size: 0.72rem;
-      padding: 2px 8px;
-      border-radius: 10px;
-      margin-top: 4px;
-      margin-left: 0;
-      letter-spacing: 0.5px;
-      white-space: nowrap;
-      animation: rankPulse 2.2s ease-in-out infinite;
+  if (seasonState.lastMmrResetMonth !== currentMonth) {
+    for (const [id, rating] of Object.entries(userRatings)) {
+      const sock = io.sockets.sockets.get(id);
+      const playerId = sock && sock.data ? sock.data.playerId : null;
+      if (playerId) {
+        accountPreResetRatings[playerId] = rating;
+      }
+      userRatings[id] = softResetMMR(rating);
+      if (playerId) {
+        accountRatings[playerId] = userRatings[id];
+      }
     }
-    .rank-badge.hidden-badge { display: none !important; }
-    .rank-badge.rank-tier-1 {
-      color: #3a2400;
-      background: linear-gradient(135deg, #ffe066, #ffb200);
-      text-shadow: 0 0 4px #fff6d0;
-      box-shadow: 0 0 8px rgba(255, 215, 0, 0.85), 0 0 18px rgba(255, 178, 0, 0.4);
+    seasonState.lastMmrResetMonth = currentMonth;
+    console.log(`[Season] MMR soft reset applied for month ${currentMonth}`);
+  }
+
+  if (seasonState.lastTrophyResetMonth !== currentMonth) {
+    for (const [id] of Object.entries(userTrophies)) {
+      userTrophies[id] = 0;
     }
-    .rank-badge.rank-tier-3 {
-      color: #1c2733;
-      background: linear-gradient(135deg, #eef3f8, #b9c6d4);
-      text-shadow: 0 0 4px #ffffff;
-      box-shadow: 0 0 7px rgba(200, 210, 220, 0.8), 0 0 14px rgba(160, 180, 200, 0.35);
+    for (const [pid] of Object.entries(accountTrophies)) {
+      accountMonthlyTrophies[pid] = 0;
     }
-    .rank-badge.rank-tier-10 {
-      color: #2e1707;
-      background: linear-gradient(135deg, #e2a86a, #cd7f32);
-      text-shadow: 0 0 4px #ffdca8;
-      box-shadow: 0 0 7px rgba(205, 127, 50, 0.75), 0 0 14px rgba(168, 98, 30, 0.3);
+    seasonState.lastTrophyResetMonth = currentMonth;
+    console.log(`[Season] Trophy leaderboard reset for month ${currentMonth}`);
+  }
+}
+
+// ★ 단어 풀: 총 300개 (중복 없음). index.html의 WORD_POOL 배열과 반드시 동일해야 한다.
+//   - 1~110번: 기존 단어 / 111~300번: 신규 추가 단어
+const timeModeWordPool = [
+  "the", "be", "to", "of", "and", "a", "in", "that", "have", "it",
+  "for", "not", "on", "with", "he", "as", "you", "do", "at", "this",
+  "but", "his", "by", "from", "they", "we", "say", "her", "she", "or",
+  "an", "will", "my", "one", "all", "would", "there", "their", "what", "so",
+  "up", "out", "if", "about", "who", "get", "which", "go", "me", "when",
+  "make", "can", "like", "time", "no", "just", "him", "know", "take", "people",
+  "into", "year", "your", "good", "some", "could", "them", "see", "other", "than",
+  "then", "now", "look", "only", "come", "its", "over", "think", "also", "back",
+  "after", "use", "two", "how", "our", "work", "first", "well", "way", "even",
+  "new", "want", "because", "any", "these", "give", "day", "most", "us", "code",
+  "program", "system", "run", "fast", "type", "keyboard", "match", "win", "play", "speed",
+  "man", "find", "here", "thing", "tell", "many", "very", "through", "should", "call",
+  "world", "school", "still", "try", "last", "ask", "need", "too", "feel", "three",
+  "state", "never", "become", "between", "high", "really", "something", "another", "family", "own",
+  "leave", "put", "old", "while", "mean", "keep", "student", "why", "let", "great",
+  "same", "big", "group", "begin", "seem", "country", "help", "talk", "turn", "problem",
+  "every", "start", "hand", "might", "show", "part", "against", "place", "such", "again",
+  "few", "case", "week", "company", "where", "must", "right", "study", "book", "eye",
+  "job", "word", "though", "business", "issue", "side", "kind", "four", "head", "far",
+  "black", "long", "both", "little", "house", "since", "provide", "service", "around", "friend",
+  "important", "father", "sit", "away", "until", "power", "hour", "game", "often", "yet",
+  "line", "end", "among", "ever", "stand", "bad", "lose", "however", "member", "pay",
+  "law", "meet", "car", "city", "almost", "include", "continue", "set", "later", "community",
+  "much", "name", "five", "once", "white", "least", "learn", "real", "change", "team",
+  "minute", "best", "several", "idea", "body", "information", "nothing", "lead", "social", "understand",
+  "whether", "watch", "together", "follow", "parent", "stop", "face", "anything", "create", "public",
+  "already", "speak", "others", "read", "level", "allow", "add", "office", "spend", "door",
+  "health", "person", "art", "sure", "history", "within", "grow", "result", "open", "morning",
+  "walk", "reason", "low", "research", "early", "food", "before", "moment", "himself", "air",
+  "teacher", "force", "offer", "enough", "education", "across", "although", "remember", "foot", "second"
+];
+
+// 안전장치: 단어 풀이 300개가 아니거나 중복이 있으면 서버 시작 시 경고를 출력한다.
+if (timeModeWordPool.length !== 300 || new Set(timeModeWordPool).size !== timeModeWordPool.length) {
+  console.warn(`[WordPool] 경고: 단어 수=${timeModeWordPool.length}, 고유 단어 수=${new Set(timeModeWordPool).size} (300개/중복 없음이어야 함)`);
+}
+
+const ALLOWED_TIME_DURATIONS = [30, 60, 120];
+const DEFAULT_TIME_DURATION = 60;
+
+// ★ 서버 주도 카운트다운: 3 -> 2 -> 1 -> START 를 서버가 1초 간격으로 직접 방송한다.
+//   클라이언트 시계(Date.now)는 전혀 사용하지 않는다.
+const COUNTDOWN_SECONDS = 3;
+const COUNTDOWN_TICK_MS = 1000;
+
+const RANKED_UNLOCK_WINS = 3;
+// --- Anti-Cheat: 타이핑 검증 ---
+const ANTICHEAT_MIN_INTERVAL_MS = 20;          // 이 값 미만 간격이 연속되면 매크로 의심
+const ANTICHEAT_MIN_INTERVAL_STRIKE_COUNT = 5;  // 연속 위반이 이 횟수 이상이면 즉시 판정
+const ANTICHEAT_UNIFORMITY_WINDOW = 12;         // 정속 패턴 판정에 쓰는 최근 입력 개수
+const ANTICHEAT_UNIFORMITY_STDDEV_MS = 3;       // 표준편차가 이 값 미만이면 "정밀한 정속 입력"으로 의심
+const ANTICHEAT_UNIFORMITY_MEAN_MAX_MS = 90;    // 위 판정은 평균 간격도 충분히 빠를 때만 적용 (느리지만 꾸준한 사람도 있으므로)
+const ANTICHEAT_MAX_WPM = 250;                  // 지속 최고 속도 제한
+const ANTICHEAT_MAX_WPM_MIN_CHARS = 40;         // 이 정도 타이핑 후부터 WPM 판정 시작 (초반 표본 부족 방지)
+const ANTICHEAT_DELTA_HISTORY_CAP = 400;        // 플레이어별 delta 보관 최대 개수 (메모리 보호)
+
+const userRatings = {};
+const userNames = {};
+const userAvatars = {};
+const userNormalWins = {};
+const accountNormalWins = {};
+const waitingNormalPlayers = {}; // { matchKey: [socket, ...] } — 대기열 (동일 계정 매칭 방지 필터 적용)
+const userTrophies = {};
+const accountTrophies = {};
+const accountRatings = {};
+const accountNames = {};
+const ALLOWED_AVATARS = ['😀', '😎', '🤖', '🐱', '🐶', '🦊', '🐼', '🐵', '🔥', '⚡', '🎯', '🚀'];
+const DEFAULT_AVATAR = ALLOWED_AVATARS[0];
+
+// --- 중복 접속 / 어뷰징 방지 (Anti-Abuse) ---
+// [주의] 테스트 목적으로 IP 기반 판정은 완전히 제거됨. 동일 playerId(계정) 기준으로만 판정한다.
+const playerIdToSocket = {}; // { playerId: socketId } — 동일 계정 다중 접속 차단용
+
+// 두 소켓이 같은 계정(playerId)에서 접속했는지 판정한다.
+// true면 매칭이 성립되지 않고, 이미 진행된 대전(커스텀 룸 등)이라면 보상이 무효화된다.
+function isAbusivePair(socketA, socketB) {
+  if (!socketA || !socketB) return false;
+  const pidA = socketA.data && socketA.data.playerId;
+  const pidB = socketB.data && socketB.data.playerId;
+  return !!(pidA && pidB && pidA === pidB);
+}
+
+// Player # + 6자리 랜덤 숫자 형태의 닉네임 생성
+function generatePlayerCode() {
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+  let result = '';
+  for (let i = 0; i < 6; i++) {
+    result += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  return result;
+}
+
+function generatePlayerNick(code) {
+  return `Player #${code}`;
+}
+
+// 랭킹 순위 기반 닉네임 태그 생성 (100위 이내에만 [#순위] 태그 부여)
+function buildPlayerTags(playerId, topRankList) {
+  if (!topRankList) return '';
+  const idx = topRankList.findIndex(entry => entry.playerId === playerId);
+  if (idx === -1) return '';
+  const rank = idx + 1;
+  if (rank <= 100) return `[#${rank}]`;
+  return '';
+}
+
+// 기존 닉네임에 붙은 [#...] 태그를 모두 떼어내고, 새로 받은 랭킹 태그를 붙여 반환한다.
+function appendDynamicTag(baseNick, rankTag) {
+  const base = baseNick || '';
+  const coreName = base.replace(/\[[^\]]*\]\s*/g, '').trim();
+  if (!coreName) return rankTag.trim();
+  return `${coreName} ${rankTag}`.trim();
+}
+
+// ============================================================
+// ★ 수정됨: 랭킹 계산은 "현재 접속 중인 소켓" 단위가 아니라
+//   "계정(playerId)" 단위로, 그리고 접속 여부와 무관하게
+//   서버가 알고 있는 전체 계정 데이터(accountRatings 등)를 기준으로 계산한다.
+//
+//   기존 버그:
+//   1) userRatings는 socket.id를 key로 사용하는데, 소켓 disconnect 시
+//      해당 항목이 정리(삭제)되지 않아 접속 종료된 "유령 소켓" 데이터가
+//      영구적으로 랭킹 풀에 남아 계속 누적됨.
+//   2) 매 접속(새로고침)마다 새로운 socket.id가 생성되어 기본값(1000점 등)으로
+//      랭킹 풀에 추가되므로, 동점자가 많아지고 동점 처리 시 정렬 기준이
+//      명시적이지 않아(=Object 삽입 순서에 의존) 순위가 접속할 때마다
+//      달라지는 것처럼(사실상 무작위처럼) 보였음.
+//   3) buildPlayerTags는 entry.playerId를 찾는데, 기존 buildTopRankList는
+//      entry.id(=socket.id)만 채워서 반환했기 때문에 닉네임 랭크 태그는
+//      항상 매칭 실패로 빈 문자열이 되는 별도 버그도 있었음(이번에 같이 수정).
+//
+//   수정 후:
+//   - playerId(계정)별로 유일하게 하나의 항목만 존재하도록 dedupe.
+//   - 접속 중이면 최신 socket 기준 값(userRatings 등), 아니면 영구 저장된
+//     accountRatings/accountTrophies/accountNormalWins 값을 사용.
+//   - 1차: rating(또는 trophy) 내림차순, 2차: 승수(wins) 내림차순,
+//     3차: playerId 문자열 비교(완전한 동점자까지 결정론적으로 순서 고정)
+//     로 정렬해 동일 입력에 대해 항상 동일한 순위가 나오도록 보장.
+// ============================================================
+
+// 현재 서버가 알고 있는 전체 계정 기준 랭킹 리스트(상위 100명)를 만든다.
+// sortBy: 'rating' (MMR 기준, 기본값) | 'trophy' (트로피 기준)
+function buildTopRankList(sortBy = 'rating') {
+  const byAccount = new Map();
+
+  // 1) 현재 접속 중인 소켓들의 최신 값을 계정 단위로 모은다.
+  for (const [socketId, sock] of io.sockets.sockets) {
+    const playerId = sock.data && sock.data.playerId;
+    if (!playerId) continue; // 아직 identify 되지 않은 소켓은 랭킹에서 제외
+    byAccount.set(playerId, {
+      playerId,
+      rating: Number.isFinite(userRatings[socketId]) ? userRatings[socketId] : (accountRatings[playerId] ?? 1000),
+      trophies: Number.isFinite(userTrophies[socketId]) ? userTrophies[socketId] : (accountTrophies[playerId] ?? 0),
+      wins: Number.isFinite(userNormalWins[socketId]) ? userNormalWins[socketId] : (accountNormalWins[playerId] ?? 0)
+    });
+  }
+
+  // 2) 현재 접속하지 않은(오프라인) 계정도 영구 저장된 값 기준으로 포함시킨다.
+  for (const playerId of Object.keys(accountRatings)) {
+    if (byAccount.has(playerId)) continue;
+    byAccount.set(playerId, {
+      playerId,
+      rating: accountRatings[playerId] ?? 1000,
+      trophies: accountTrophies[playerId] ?? 0,
+      wins: accountNormalWins[playerId] ?? 0
+    });
+  }
+
+  const list = Array.from(byAccount.values());
+
+  const primaryKey = sortBy === 'trophy' ? 'trophies' : 'rating';
+  list.sort((a, b) => {
+    if (b[primaryKey] !== a[primaryKey]) return b[primaryKey] - a[primaryKey]; // 1차: 점수 내림차순
+    if (b.wins !== a.wins) return b.wins - a.wins;                             // 2차: 일반전 승수 내림차순
+    return a.playerId.localeCompare(b.playerId);                               // 3차: 계정ID 사전순(완전 동률 결정론적 처리)
+  });
+
+  return list.slice(0, 100);
+}
+
+// 주어진 소켓 ID에 대해, 현재 전역 랭킹 순위 기반 태그를 생성한다.
+function buildRankTagForSocket(socketId) {
+  const sock = io.sockets.sockets.get(socketId);
+  const playerId = sock && sock.data ? sock.data.playerId : null;
+  if (!playerId) return '';
+  const topRankList = buildTopRankList('rating');
+  return buildPlayerTags(playerId, topRankList);
+}
+
+// 주어진 소켓 ID의 현재 전역 순위(1~100)를 반환. 100위 밖이거나 미식별 소켓이면 null.
+// sortBy: 'rating' (기본값, MMR 기준) | 'trophy'
+function getPlayerRankInfo(socketId, sortBy = 'rating') {
+  const sock = io.sockets.sockets.get(socketId);
+  const playerId = sock && sock.data ? sock.data.playerId : null;
+  if (!playerId) return null;
+  const topRankList = buildTopRankList(sortBy);
+  const idx = topRankList.findIndex(entry => entry.playerId === playerId);
+  return idx === -1 ? null : idx + 1;
+}
+
+const waitingRankedPlayers = [];
+const rooms = {};
+const customRooms = {}; // { CODE: { mode, duration, isRanked, players: [socket] } }
+
+// --- Rematch System ---
+const REMATCH_TIMEOUT_MS = 10000; // 재경기 수락 대기 시간 (10초)
+const RECENT_MATCH_TTL_MS = 60000; // 경기 종료 후 재경기 요청이 가능한 유효 시간
+const recentMatches = {}; // { roomId: { playerIds: [idA, idB], mode, duration, isRanked } } — 방금 끝난 경기 정보
+const pendingRematches = {}; // { roomId: { accepted: Set<socketId>, timeoutId } } — 재경기 수락 대기 상태
+
+function cleanupPendingRematch(roomId) {
+  const pending = pendingRematches[roomId];
+  if (pending) {
+    clearTimeout(pending.timeoutId);
+    delete pendingRematches[roomId];
+  }
+}
+
+// --- Report System ---
+const reportLogs = [];
+const reportedInMatch = {};
+
+const DISCORD_REPORT_WEBHOOK = process.env.DISCORD_REPORT_WEBHOOK || '';
+
+function sendDiscordReportWebhook(entry) {
+  if (!DISCORD_REPORT_WEBHOOK) return;
+
+  const reasonLabels = {
+    cheating: 'Cheating / Auto-typer',
+    inappropriate_name: 'Inappropriate Name',
+    other: 'Other'
+  };
+
+  const embed = {
+    title: '🚨 NEW USER REPORT',
+    color: 0xff4444,
+    fields: [
+      { name: 'Reporter', value: `${entry.reporterName} (\`${entry.reporterId}\`)`, inline: true },
+      { name: 'Target',   value: `${entry.targetName} (\`${entry.targetId}\`)`,   inline: true },
+      { name: 'Reason',   value: reasonLabels[entry.reason] || entry.reason,       inline: true },
+      { name: 'Room',     value: entry.roomId,                                     inline: true },
+      { name: 'Time (UTC)', value: entry.timestamp,                                inline: true }
+    ],
+    footer: { text: 'Typing Multiplayer — Report System' },
+    timestamp: entry.timestamp
+  };
+
+  fetch(DISCORD_REPORT_WEBHOOK, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ embeds: [embed] })
+  })
+    .then((res) => {
+      if (!res.ok) console.error(`[Discord] Webhook failed: ${res.status} ${res.statusText}`);
+      else console.log('[Discord] Report webhook sent successfully.');
+    })
+    .catch((err) => console.error('[Discord] Webhook error:', err.message));
+}
+
+function generateRoomCode() {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  let code = '';
+  for (let i = 0; i < 6; i++) code += chars[Math.floor(Math.random() * chars.length)];
+  return code;
+}
+
+const TIERS = [
+  { min: 1900, label: '챌린저', color: '#f97316', icon: '🔥' },
+  { min: 1700, label: '마스터', color: '#a855f7', icon: '👑' },
+  { min: 1500, label: '다이아몬드', color: '#38bdf8', icon: '💎' },
+  { min: 1300, label: '플래티넘', color: '#14b8a6', icon: '💠' },
+  { min: 1100, label: '골드', color: '#e2b714', icon: '🥇' },
+  { min: 900, label: '실버', color: '#c0c0c0', icon: '🥈' },
+  { min: 700, label: '브론즈', color: '#cd7f32', icon: '🥉' },
+  { min: -Infinity, label: '아이언', color: '#8b8f98', icon: '⛓️' }
+];
+
+function getTierInfo(rating) {
+  const safeRating = Number.isFinite(rating) ? rating : 1000;
+  return TIERS.find((t) => safeRating >= t.min) || TIERS[TIERS.length - 1];
+}
+
+function timeModeWordCount(duration) {
+  return Math.max(200, Math.ceil(duration * 6));
+}
+
+function isEasyTransition(prevWord, nextWord) {
+  if (!prevWord) return false;
+  if (prevWord === nextWord) return true;
+  if (prevWord.length <= 3 && nextWord.length <= 3) return true;
+  if (prevWord[prevWord.length - 1] === nextWord[0]) return true;
+  return false;
+}
+
+function pickNextWord(pool, prevWord) {
+  const candidates = pool.filter(w => !isEasyTransition(prevWord, w));
+  const source = candidates.length > 0 ? candidates : pool;
+  return source[Math.floor(Math.random() * source.length)];
+}
+
+// 대전(1v1) 텍스트와 연습 모드 텍스트 모두 이 함수를 통해 300개 단어 풀(timeModeWordPool)에서 무작위 추출된다.
+function generateRandomText(targetWordCount) {
+  const words = [];
+  let prevWord = null;
+  for (let i = 0; i < targetWordCount; i++) {
+    const word = pickNextWord(timeModeWordPool, prevWord);
+    words.push(word);
+    prevWord = word;
+  }
+  return words.join(' ');
+}
+
+function generateUniqueText(mode, duration, previousText = '') {
+  const targetCount = timeModeWordCount(duration);
+  let newText = generateRandomText(targetCount);
+  let attempts = 0;
+  while (newText === previousText && attempts < 10) {
+    newText = generateRandomText(targetCount);
+    attempts++;
+  }
+  return newText;
+}
+
+function calculateNewRatings(winnerRating, loserRating) {
+  const K = 32;
+  const expectedWinner = 1 / (1 + Math.pow(10, (loserRating - winnerRating) / 400));
+  const expectedLoser = 1 - expectedWinner;
+
+  const newWinnerRating = Math.round(winnerRating + K * (1 - expectedWinner));
+  const newLoserRating = Math.round(Math.max(0, loserRating + K * (0 - expectedLoser)));
+
+  return { newWinnerRating, newLoserRating };
+}
+
+function removeFromWaitingQueues(socket) {
+  delete soloPracticeSessions[socket.id];
+  Object.keys(waitingNormalPlayers).forEach((k) => {
+    if (!Array.isArray(waitingNormalPlayers[k])) return;
+    waitingNormalPlayers[k] = waitingNormalPlayers[k].filter((s) => s !== socket);
+    if (waitingNormalPlayers[k].length === 0) delete waitingNormalPlayers[k];
+  });
+  const rIdx = waitingRankedPlayers.findIndex((p) => p.socket === socket);
+  if (rIdx > -1) waitingRankedPlayers.splice(rIdx, 1);
+}
+
+const PRACTICE_TEXT_DURATION = 60;
+const soloPracticeSessions = {};
+
+function clearPracticeSession(socketId) {
+  delete soloPracticeSessions[socketId];
+}
+
+// 클라이언트가 보내는 playerId를 검증/정규화한다.
+// "Player #XXXXXX" 형태와 순수 6자리 코드("XXXXXX") 형태 모두 허용하고,
+// 항상 "Player #XXXXXX" (대문자 코드) 표준 형태로 통일해서 반환한다.
+function sanitizePlayerId(raw) {
+  if (typeof raw !== 'string') return null;
+  const id = raw.trim();
+  const fullMatch = id.match(/^Player #([A-Z0-9]{6})$/i);
+  if (fullMatch) return `Player #${fullMatch[1].toUpperCase()}`;
+  if (/^[A-Z0-9]{6}$/i.test(id)) return `Player #${id.toUpperCase()}`;
+  return null;
+}
+
+function getNormalWins(socket) {
+  return userNormalWins[socket.id] || 0;
+}
+
+function isRankedUnlocked(socket) {
+  return getNormalWins(socket) >= RANKED_UNLOCK_WINS;
+}
+
+function unlockPayload(socket) {
+  const normalWins = getNormalWins(socket);
+  return {
+    normalWins,
+    requiredWins: RANKED_UNLOCK_WINS,
+    rankedUnlocked: normalWins >= RANKED_UNLOCK_WINS
+  };
+}
+
+function persistNormalWins(socket) {
+  if (socket.data && socket.data.playerId) {
+    accountNormalWins[socket.data.playerId] = getNormalWins(socket);
+    accountRatings[socket.data.playerId] = userRatings[socket.id] || 1000;
+    const baseName = (userNames[socket.id] || '').replace(/\[[^\]]*\]\s*/g, '').trim();
+    if (baseName) accountNames[socket.data.playerId] = baseName;
+  }
+}
+
+function persistRatings(socket) {
+  if (socket.data && socket.data.playerId) {
+    accountRatings[socket.data.playerId] = userRatings[socket.id] || 1000;
+  }
+}
+
+function persistTrophies(socket) {
+  if (socket.data && socket.data.playerId) {
+    const pid = socket.data.playerId;
+    const currentTrophies = userTrophies[socket.id] || 0;
+    accountTrophies[pid] = currentTrophies;
+    accountMonthlyTrophies[pid] = currentTrophies;
+  }
+}
+
+function addNormalWin(socket) {
+  if (!socket) return;
+  const wasUnlocked = isRankedUnlocked(socket);
+  userNormalWins[socket.id] = getNormalWins(socket) + 1;
+  persistNormalWins(socket);
+  const payload = unlockPayload(socket);
+  payload.justUnlocked = !wasUnlocked && payload.rankedUnlocked;
+  socket.emit('unlockStatus', payload);
+  return payload;
+}
+
+function createEmptyPlayerState() {
+  return {
+    percent: 0, accuracy: 100, charIndex: 0, finished: false, finishTime: null,
+    netCorrect: 0, totalTyped: 0, totalErrors: 0,
+    // --- Anti-Cheat ---
+    deltaHistory: [],   // 최근 keystroke 간격(ms) 기록 (서버 메모리에만 보관, 검증용)
+    fastStreak: 0,      // 연속으로 임계치 미만 간격이 발생한 횟수
+    disqualified: false
+  };
+}
+
+function sanitizeStat(data, sampleTextLength) {
+  const accuracy = Number.isFinite(data.accuracy) ? Math.max(0, Math.min(100, data.accuracy)) : 100;
+  const charIndex = Number.isFinite(data.charIndex)
+    ? Math.max(0, Math.min(sampleTextLength, Math.floor(data.charIndex)))
+    : 0;
+  const netCorrect = Number.isFinite(data.netCorrect) ? Math.max(0, Math.floor(data.netCorrect)) : 0;
+  const totalTyped = Number.isFinite(data.totalTyped) ? Math.max(0, Math.floor(data.totalTyped)) : 0;
+  const totalErrors = Number.isFinite(data.totalErrors) ? Math.max(0, Math.floor(data.totalErrors)) : 0;
+  return { accuracy, charIndex, netCorrect, totalTyped, totalErrors };
+}
+
+// 클라이언트가 보낸 keystroke 간격(ms) 배치를 플레이어 상태에 반영한다.
+// 개수/값 범위를 서버에서 재검증해 비정상적으로 큰 배열이나 음수·과대값 주입을 막는다.
+function recordAntiCheatDeltas(player, rawDeltas) {
+  if (!Array.isArray(rawDeltas)) return;
+  const clean = rawDeltas
+    .filter((d) => Number.isFinite(d) && d >= 0 && d < 10000)
+    .slice(0, 50); // 한 번에 비정상적으로 큰 배열을 보내는 것 자체도 조작 신호이므로 상한
+
+  clean.forEach((delta) => {
+    player.deltaHistory.push(delta);
+    if (player.deltaHistory.length > ANTICHEAT_DELTA_HISTORY_CAP) player.deltaHistory.shift();
+    player.fastStreak = delta < ANTICHEAT_MIN_INTERVAL_MS ? player.fastStreak + 1 : 0;
+  });
+}
+
+// 매크로/오토핫키형 패턴 감지: (1) 연속 초단타, (2) 사람이 치기 힘든 수준의 균일(정속) 타건
+function detectMacroPattern(player) {
+  if (player.fastStreak >= ANTICHEAT_MIN_INTERVAL_STRIKE_COUNT) {
+    return 'MACRO_MIN_INTERVAL';
+  }
+
+  const window = player.deltaHistory.slice(-ANTICHEAT_UNIFORMITY_WINDOW);
+  if (window.length >= ANTICHEAT_UNIFORMITY_WINDOW) {
+    const mean = window.reduce((a, b) => a + b, 0) / window.length;
+    if (mean <= ANTICHEAT_UNIFORMITY_MEAN_MAX_MS) {
+      const variance = window.reduce((a, b) => a + (b - mean) * (b - mean), 0) / window.length;
+      const stddev = Math.sqrt(variance);
+      if (stddev < ANTICHEAT_UNIFORMITY_STDDEV_MS) {
+        return 'MACRO_UNIFORM_TIMING';
+      }
+    }
+  }
+  return null;
+}
+
+// 지속 최고 속도(WPM) 제한 감지 — START 신호를 보낸 시각(room.startTime) 기준 누적 타수로 계산.
+function detectSpeedLimit(player, room) {
+  if (!room.started || !Number.isFinite(room.startTime)) return null;
+  if (player.totalTyped < ANTICHEAT_MAX_WPM_MIN_CHARS) return null;
+  const elapsedMs = Date.now() - room.startTime;
+  if (elapsedMs <= 0) return null;
+  const minutes = elapsedMs / 60000;
+  const wpm = (player.totalTyped / 5) / minutes;
+  return wpm >= ANTICHEAT_MAX_WPM ? 'SPEED_LIMIT_EXCEEDED' : null;
+}
+
+// 감지된 부정행위자를 즉시 몰수패 처리한다. endGame을 그대로 재사용하므로
+// 상대는 랭크 MMR/트로피/정상승수까지 일반 승리와 동일하게 정산된다.
+function disqualifyPlayer(roomId, cheaterId, reasonCode) {
+  const room = rooms[roomId];
+  if (!room || room.ended) return;
+  const winnerId = Object.keys(room.players).find((id) => id !== cheaterId) || null;
+  console.log(`[Anti-Cheat] Disqualified in room ${roomId}: player=${cheaterId} reason=${reasonCode}`);
+  endGame(roomId, winnerId, { reason: 'cheat_detected', cheatReason: reasonCode, cheaterId });
+}
+
+// ============================================================
+// ★ 서버 주도 카운트다운
+//   - 방 안의 "두 플레이어 소켓"에게만 직접 emit 한다.
+//     (io.to(roomId)를 쓰면 커스텀룸 코드가 재사용될 때 이전 경기 소켓이 섞일 수 있음)
+//   - 1초 간격으로 { value: 3 } -> { value: 2 } -> { value: 1 } -> { value: 'START' }
+//   - START를 보내는 그 시점에 room.started = true, room.startTime 기록, 종료 타이머 시작.
+// ============================================================
+function emitToRoomPlayers(room, event, payload) {
+  Object.keys(room.players).forEach((id) => {
+    io.to(id).emit(event, payload);
+  });
+}
+
+function stopCountdown(room) {
+  if (room && room.countdownTimerId) {
+    clearInterval(room.countdownTimerId);
+    room.countdownTimerId = null;
+  }
+}
+
+function runServerCountdown(roomId) {
+  const room = rooms[roomId];
+  if (!room || room.ended) return;
+
+  let remaining = COUNTDOWN_SECONDS;
+  emitToRoomPlayers(room, 'countdownTick', { value: remaining });
+
+  room.countdownTimerId = setInterval(() => {
+    const r = rooms[roomId];
+    if (!r || r.ended) {
+      if (r) stopCountdown(r);
+      return;
     }
 
-    .user-info-row { display: flex; align-items: center; justify-content: center; gap: 10px; margin-bottom: 15px; }
-    .my-avatar-badge { width: 30px; height: 30px; border-radius: 50%; background: #1c1c1c; border: 1px solid #444; display: flex; align-items: center; justify-content: center; font-size: 1rem; }
+    remaining -= 1;
 
-    .private-section { margin-top: 18px; display: flex; flex-direction: column; align-items: center; gap: 10px; }
-    .btn-private { padding: 12px 24px; font-size: 0.95rem; font-weight: bold; background: #1c1c1c; border: 2px solid #6c63ff; color: #6c63ff; border-radius: 10px; cursor: pointer; transition: border-color 0.15s, transform 0.15s; }
-    .btn-private:hover { border-color: #8b83ff; transform: translateY(-2px); }
-    .join-row { display: flex; gap: 8px; align-items: center; }
-    .join-row input { width: 140px; padding: 10px 12px; font-size: 0.95rem; font-weight: bold; letter-spacing: 2px; text-transform: uppercase; background: #121212; border: 2px solid #444; border-radius: 8px; color: #fff; text-align: center; }
-    .join-row input:focus { outline: none; border-color: #6c63ff; }
-    .join-row input::placeholder { letter-spacing: 0; text-transform: none; font-weight: normal; }
-    .btn-join { padding: 10px 16px; font-size: 0.9rem; font-weight: bold; background: #6c63ff; color: #fff; border: none; border-radius: 8px; cursor: pointer; }
-    .btn-join:hover { background: #5a52e0; }
+    if (remaining > 0) {
+      emitToRoomPlayers(r, 'countdownTick', { value: remaining });
+      return;
+    }
 
-    .room-code-modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.7); align-items: center; justify-content: center; z-index: 60; }
-    .room-code-modal.show { display: flex; }
-    .room-code-box { width: 380px; background: #1c1c1c; border: 1px solid #333; border-radius: 12px; padding: 28px; text-align: center; }
-    .room-code-box h3 { margin: 0 0 12px; font-size: 1.1rem; color: #6c63ff; }
-    .room-code-display { font-size: 2.2rem; font-weight: bold; letter-spacing: 6px; color: #fff; background: #121212; border: 2px solid #6c63ff; border-radius: 8px; padding: 12px 18px; margin: 12px 0; display: inline-block; }
-    .room-code-box .hint { font-size: 0.8rem; color: #888; margin-bottom: 16px; }
-    .btn-copy-link { padding: 10px 20px; font-size: 0.9rem; font-weight: bold; background: var(--mt-yellow); color: #121212; border: none; border-radius: 6px; cursor: pointer; margin-right: 8px; }
-    .btn-copy-link:hover { background: #d4a810; }
-    .btn-close-room { padding: 10px 20px; font-size: 0.9rem; background: transparent; border: 1px solid #555; color: #aaa; border-radius: 6px; cursor: pointer; }
-    .btn-close-room:hover { background: #222; border-color: #777; }
+    // ★ START — 양쪽 클라이언트가 동시에 입력창을 열고 타이머를 시작한다.
+    stopCountdown(r);
+    r.started = true;
+    r.startTime = Date.now(); // 서버 내부 기록용 (Anti-Cheat WPM 계산에만 사용)
+    emitToRoomPlayers(r, 'countdownTick', { value: 'START' });
 
-    .room-waiting { margin-top: 12px; padding: 14px; background: #1a1a2e; border: 1px solid #6c63ff; border-radius: 8px; font-size: 0.95rem; color: #aaa; }
-    .room-waiting .code-label { font-size: 0.8rem; color: #6c63ff; margin-bottom: 6px; }
-    .room-waiting .code-value { font-size: 1.4rem; font-weight: bold; letter-spacing: 4px; color: #fff; }
-    .room-waiting .dots::after { content: ''; animation: dots 1.4s steps(4, end) infinite; }
-    @keyframes dots { 0%,20% { content: ''; } 40% { content: '.'; } 60% { content: '..'; } 80%,100% { content: '...'; } }
+    // 종료 타이머는 START 시점부터 duration 만큼
+    r.endTimeoutId = setTimeout(() => endGame(roomId, undefined), r.duration * 1000);
+  }, COUNTDOWN_TICK_MS);
+}
 
-    .leaderboard-section { margin-bottom: 16px; }
-    .header-tabs { display: flex; width: 100%; margin-bottom: 14px; border-bottom: 2px solid #222; }
-    .header-tab { flex: 1; padding: 12px 0; font-size: 1rem; font-weight: bold; background: transparent; border: none; color: #555; cursor: pointer; transition: color 0.15s, border-color 0.15s; border-bottom: 3px solid transparent; margin-bottom: -2px; }
-    .header-tab:hover { color: #aaa; }
-    .header-tab.active { color: var(--mt-yellow); border-bottom-color: var(--mt-yellow); }
-    .lb-list { max-height: 220px; overflow-y: auto; background: #1a1a1a; border: 1px solid #333; border-radius: 8px; }
-    .lb-list::-webkit-scrollbar { width: 4px; }
-    .lb-list::-webkit-scrollbar-thumb { background: #444; border-radius: 4px; }
-    .lb-row { display: flex; align-items: center; padding: 7px 12px; font-size: 0.85rem; border-bottom: 1px solid #222; }
-    .lb-row:last-child { border-bottom: none; }
-    .lb-row.me { background: rgba(226,183,20,0.1); border-left: 3px solid var(--mt-yellow); }
-    .lb-row.top1 .lb-rank { color: #ffd700; }
-    .lb-row.top2 .lb-rank { color: #c0c0c0; }
-    .lb-row.top3 .lb-rank { color: #cd7f32; }
-    .lb-rank { min-width: 50px; font-weight: bold; color: #666; text-align: left; flex-shrink: 0; }
-    .lb-avatar { margin: 0 8px; font-size: 1rem; }
-    .lb-name { flex: 1; color: #ccc; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    .lb-row.me .lb-name { color: var(--mt-yellow); font-weight: bold; }
-    .lb-score { font-weight: bold; color: #fff; margin-left: 8px; min-width: 50px; text-align: right; }
-    .lb-empty { text-align: center; padding: 20px; color: #555; font-size: 0.85rem; }
+function startMatch(playerA, playerB, mode, duration, isRanked, customRoomId) {
+  const roomId = customRoomId || `room_${playerA.id}_${playerB.id}_${Date.now()}`;
+  const prevTextA = playerA.data.lastText || '';
+  const text = generateUniqueText(mode, duration, prevTextA);
 
-    .btn-report { background: transparent; border: 1px solid #555; color: #888; font-size: 0.72rem; padding: 3px 8px; border-radius: 4px; cursor: pointer; margin-left: 8px; vertical-align: middle; transition: all 0.15s; }
-    .btn-report:hover { border-color: #ca4754; color: #ca4754; }
-    .btn-report:disabled { opacity: 0.4; cursor: not-allowed; }
-    .opp-name-row { display: flex; align-items: center; justify-content: center; gap: 6px; margin-bottom: 10px; }
-    .opp-name-row .opp-label { font-size: 0.85rem; color: #888; }
-    .opp-name-row .opp-name { font-size: 1rem; font-weight: bold; color: #2196f3; }
-    .report-modal-overlay { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.6); align-items: center; justify-content: center; z-index: 70; }
-    .report-modal-overlay.show { display: flex; }
-    .report-modal-box { width: 360px; background: #1c1c1c; border: 1px solid #333; border-radius: 12px; padding: 22px; text-align: left; }
-    .report-modal-box h3 { margin: 0 0 14px; font-size: 1.05rem; color: #ca4754; }
-    .report-option { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border: 1px solid #333; border-radius: 6px; margin-bottom: 6px; cursor: pointer; transition: border-color 0.15s; font-size: 0.9rem; color: #ccc; }
-    .report-option:hover { border-color: #666; }
-    .report-option.selected { border-color: #ca4754; background: rgba(202,71,84,0.08); }
-    .report-option input[type="radio"] { accent-color: #ca4754; }
+  playerA.data.lastText = text;
+  playerB.data.lastText = text;
 
-    .lobby-header.hidden { display: none !important; }
+  playerA.join(roomId);
+  playerB.join(roomId);
+  playerA.data.roomId = roomId;
+  playerB.data.roomId = roomId;
 
-    .view { display: none; }
-    .view.active { display: block; }
-    .view.hidden { display: none !important; }
+  const invalidated = isAbusivePair(playerA, playerB);
+  if (invalidated) console.log(`[Anti-Abuse] Same-account match created: ${roomId}`);
 
-    .lb-fullpage { margin-top: 0; }
-    .lb-fullpage .lb-list { max-height: calc(100vh - 120px); overflow-y: auto; background: #1a1a1a; border: 1px solid #333; border-radius: 10px; }
-    .lb-fullpage .lb-row { padding: 10px 16px; font-size: 0.95rem; }
-    .lb-fullpage .lb-rank { min-width: 60px; font-size: 1.05rem; }
-    .lb-fullpage .lb-avatar { font-size: 1.2rem; margin: 0 10px; }
-    .lb-fullpage .lb-name { font-size: 1rem; }
-    .lb-fullpage .lb-score { font-size: 1.05rem; min-width: 60px; }
-  </style>
-</head>
-<body>
+  rooms[roomId] = {
+    mode, text, duration, isRanked,
+    invalidated,
+    started: false,          // ★ START 신호 전송 후 true
+    startTime: null,         // ★ START 신호 전송 시각 (서버 내부용)
+    countdownTimerId: null,
+    endTimeoutId: null, ended: false, players: {}
+  };
+  rooms[roomId].players[playerA.id] = createEmptyPlayerState();
+  rooms[roomId].players[playerB.id] = createEmptyPlayerState();
 
-  <div class="container">
-    <div class="header-tabs" id="headerTabs">
-      <button class="header-tab active" data-view="play" onclick="switchView('play')">🎮 Play</button>
-      <button class="header-tab" data-view="rank" onclick="switchView('rank')">🏆 Rank</button>
-      <button class="header-tab" data-view="trophy" onclick="switchView('trophy')">🎖 Trophy</button>
-    </div>
+  const ratingA = userRatings[playerA.id];
+  const ratingB = userRatings[playerB.id];
+  const nameA = userNames[playerA.id];
+  const nameB = userNames[playerB.id];
+  const avatarA = userAvatars[playerA.id] || DEFAULT_AVATAR;
+  const avatarB = userAvatars[playerB.id] || DEFAULT_AVATAR;
+  const tierA = getTierInfo(ratingA);
+  const tierB = getTierInfo(ratingB);
+  const trophiesA = userTrophies[playerA.id] || 0;
+  const trophiesB = userTrophies[playerB.id] || 0;
+  // 매치 시작 시점 기준 전역 순위 (100위 밖이면 null)
+  const rankA = getPlayerRankInfo(playerA.id, isRanked ? 'rating' : 'trophy');
+  const rankB = getPlayerRankInfo(playerB.id, isRanked ? 'rating' : 'trophy');
 
-    <div id="lobbyHeader">
+  // ★ gameStart는 "셋업" 신호다. startTime은 더 이상 보내지 않는다.
+  //   실제 시작 시점은 이후 countdownTick의 'START'가 결정한다.
+  const basePayload = {
+    mode, text,
+    duration: mode === 'time' ? duration : null,
+    isRanked
+  };
 
-    <div class="view active" id="playView">
-      <div class="user-info-row">
-        <div class="my-avatar-badge" id="myAvatarBadge">😀</div>
-        <div class="user-info"><span id="myNameDisplay">Connecting...</span> · MMR <span id="myRatingDisplay">1000</span></div>
-      </div>
+  playerA.emit('gameStart', {
+    ...basePayload,
+    myName: nameA, myRating: ratingA, myTier: tierA, myAvatar: avatarA, myTrophies: trophiesA, myRank: rankA,
+    opponentName: nameB, opponentRating: ratingB, opponentTier: tierB, opponentAvatar: avatarB, opponentTrophies: trophiesB, opponentRank: rankB
+  });
+  playerB.emit('gameStart', {
+    ...basePayload,
+    myName: nameB, myRating: ratingB, myTier: tierB, myAvatar: avatarB, myTrophies: trophiesB, myRank: rankB,
+    opponentName: nameA, opponentRating: ratingA, opponentTier: tierA, opponentAvatar: avatarA, opponentTrophies: trophiesA, opponentRank: rankA
+  });
 
-      <div class="tab-row" id="typeTab">
-        <button class="tab-btn active" id="normalTabBtn" onclick="switchMatchKind(false)">Casual</button>
-        <button class="tab-btn locked" id="rankedTabBtn" onclick="switchMatchKind(true)">
-          Ranked
-          <span class="lock-label" id="rankedLockLabel">🔒 Win 3 Casual matches to unlock</span>
-        </button>
-      </div>
+  // ★ 서버가 1초 간격으로 3 -> 2 -> 1 -> START 방송
+  runServerCountdown(roomId);
+}
 
-      <div class="unlock-panel" id="unlockPanel">
-        <div class="unlock-panel-head">
-          <span>Unlock Ranked</span>
-          <strong id="unlockCountLabel">0 / 3 Wins</strong>
-        </div>
-        <div class="unlock-bar-bg">
-          <div class="unlock-bar-fill" id="unlockBarFill"></div>
-        </div>
-      </div>
+function endGame(roomId, forcedWinnerId, options = {}) {
+  const room = rooms[roomId];
+  if (!room || room.ended) return;
+  room.ended = true;
+  clearTimeout(room.endTimeoutId);
+  stopCountdown(room); // ★ 카운트다운 도중 종료(이탈 등)되면 틱 방송을 멈춘다
+  const reason = options.reason || null; // 'forfeit', 'cheat_detected' 등 — 클라이언트에 전달
+  const cheatReason = options.cheatReason || null;
+  const cheaterId = options.cheaterId || null;
 
-      <h2 id="title">Select Match Duration</h2>
-      <div class="status-message" id="statusMessage"></div>
-      <div class="waiting-controls" id="waitingControls" style="display:none; margin-bottom: 14px;">
-        <div style="display:flex; gap:10px; justify-content:center;">
-          <button class="btn-restart" id="enterPracticeBtn" onclick="enterSoloPractice()">🎯 Enter Solo Practice</button>
-          <button class="btn-restart btn-secondary" onclick="cancelSearch()">✕ Cancel Queue</button>
-        </div>
-      </div>
+  const ids = Object.keys(room.players);
+  let winnerId = forcedWinnerId;
 
-      <div class="mode-select" id="modeSelect">
-        <div class="mode-buttons" id="mainModeButtons">
-          <button class="btn-mode" onclick="selectMode('time', 30)">
-            <span class="mode-title">⏱ 30s</span>
-            <span class="mode-desc">Fast</span>
-          </button>
-          <button class="btn-mode" onclick="selectMode('time', 60)">
-            <span class="mode-title">⏱ 60s</span>
-            <span class="mode-desc">Standard</span>
-          </button>
-          <button class="btn-mode" onclick="selectMode('time', 120)">
-            <span class="mode-title">⏱ 120s</span>
-            <span class="mode-desc">Long</span>
-          </button>
-          <button class="btn-mode" id="btnPractice" onclick="startPracticeMode()">
-            <span class="mode-title">✏️ Practice</span>
-            <span class="mode-desc">No limit, no opponent</span>
-          </button>
-        </div>
+  if (winnerId === undefined) {
+    const [id1, id2] = ids;
+    const p1 = room.players[id1];
+    const p2 = room.players[id2];
 
-        <div class="private-section">
-          <button class="btn-private" onclick="startPrivateRoom()">🔗 Create Custom Room</button>
-          <div class="join-row">
-            <input type="text" id="inviteCodeInput" placeholder="Enter room code" maxlength="6" autocomplete="off">
-            <button class="btn-join" onclick="joinPrivateRoom()">Join</button>
-          </div>
-        </div>
-      </div>
+    const nc1 = Number.isFinite(p1.netCorrect) ? p1.netCorrect : 0;
+    const nc2 = Number.isFinite(p2.netCorrect) ? p2.netCorrect : 0;
 
-      <div class="room-waiting" id="roomWaiting" style="display:none;">
-        <div class="code-label">Invite Code</div>
-        <div class="code-value" id="roomWaitingCode"></div>
-        <div>Waiting for opponent<span class="dots"></span></div>
-        <div style="margin-top:10px; display:flex; gap:8px; justify-content:center;">
-          <button class="btn-copy-link" id="copyInviteLinkBtn" style="display:none;" onclick="copyInviteLinkToClipboard()">📋 Copy Invite Link</button>
-          <button class="btn-close-room" onclick="cancelPrivateRoom()">✕ Leave Room</button>
-        </div>
-      </div>
-    </div>
-
-    <div class="view" id="rankView">
-      <div class="lb-fullpage">
-        <div class="lb-list" id="rankLeaderboard">
-          <div class="lb-empty">Loading...</div>
-        </div>
-      </div>
-    </div>
-
-    <div class="view" id="trophyView">
-      <div class="lb-fullpage">
-        <div class="lb-list" id="trophyLeaderboard">
-          <div class="lb-empty">Loading...</div>
-        </div>
-      </div>
-    </div>
-    </div><!-- /lobbyHeader -->
-
-    <div class="room-code-modal" id="roomCodeModal">
-      <div class="room-code-box">
-        <h3>🔗 Room Created!</h3>
-        <div class="room-code-display" id="roomCodeDisplay"></div>
-        <div class="hint">Share this link with your friend</div>
-        <div style="display:flex; justify-content:center; gap:8px;">
-          <button class="btn-copy-link" onclick="copyInviteLink()">📋 Copy Link</button>
-          <button class="btn-close-room" onclick="closeRoomModal()">Close</button>
-        </div>
-      </div>
-    </div>
-
-    <div class="game-area" id="gameArea">
-      <div class="mode-badge" id="modeBadge"></div>
-
-      <div class="matchup-bar hidden-state" id="matchupBar">
-        <div class="matchup-player me">
-          <div class="matchup-avatar" id="myAvatar">😀</div>
-          <div class="matchup-info">
-            <div class="player-name" id="myMatchupName">Player</div>
-            <span class="rank-badge hidden-badge" id="myRankBadge"></span>
-            <div class="tier-badge" id="myTierBadge">🏆 0</div>
-          </div>
-        </div>
-        <div class="matchup-vs">VS</div>
-        <div class="matchup-player opponent">
-          <div class="matchup-avatar" id="oppAvatar">👤</div>
-          <div class="matchup-info">
-            <div class="player-name" id="oppMatchupName">Opponent</div>
-            <span class="rank-badge hidden-badge" id="oppRankBadge"></span>
-            <div class="tier-badge" id="oppTierBadge">🏆 0</div>
-          </div>
-        </div>
-      </div>
-
-      <div class="type-area" id="typeArea">
-        <div class="quote-viewport" id="quoteViewport">
-          <div class="quote-display" id="quoteDisplay"></div>
-        </div>
-        <input type="text" class="hidden-input" id="typingInput" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" disabled>
-      </div>
-      <div class="type-hint" id="typeHint">Click and start typing</div>
-
-      <div class="stats">
-        <div>Accuracy: <span id="accuracy">100</span>%</div>
-        <div id="timerLabel">Time: <span id="timer">30</span>s</div>
-      </div>
-
-      <div id="leaveMatchRow" style="margin-top:10px;">
-        <button class="btn-secondary btn-leave-match" onclick="leaveCurrentMatch()">🚪 Leave Match (Forfeit)</button>
-      </div>
-
-      <div class="result-banner" id="resultBanner"></div>
-
-      <div id="practiceExitRow" style="display:none; margin-top:18px;">
-        <button class="btn-restart btn-secondary" onclick="exitPractice()">← Exit Practice / Back to Menu</button>
-      </div>
-
-      <div class="restart-row" id="restartRow">
-        <button class="btn-restart" id="rematchBtn" onclick="requestRematch()">🔁 Rematch</button>
-        <button class="btn-restart" id="findNextBtn" onclick="findNextMatch()">⏭ Play Again</button>
-        <button class="btn-restart btn-secondary" onclick="location.reload()">Change Mode</button>
-      </div>
-
-      <div id="rematchStatus" style="display:none; margin-top:14px; padding:12px; background:#1a1a1a; border:1px solid #333; border-radius:8px; font-size:0.9rem; color:#aaa; text-align:center;">
-        <div id="rematchStatusText">Waiting for opponent...</div>
-        <div style="margin-top:10px; display:flex; gap:8px; justify-content:center;" id="rematchActionRow"></div>
-      </div>
-    </div>
-  </div>
-
-  <div class="report-modal-overlay" id="reportModalOverlay">
-    <div class="report-modal-box">
-      <h3>⚠ Report Player</h3>
-      <div style="font-size:0.85rem; color:#aaa; margin-bottom:12px;">Select a reason for reporting:</div>
-      <label class="report-option" onclick="selectReportReason('cheating', this)">
-        <input type="radio" name="reportReason" value="cheating"> Cheating / Auto-typer
-      </label>
-      <label class="report-option" onclick="selectReportReason('inappropriate_name', this)">
-        <input type="radio" name="reportReason" value="inappropriate_name"> Inappropriate Name
-      </label>
-      <label class="report-option" onclick="selectReportReason('other', this)">
-        <input type="radio" name="reportReason" value="other"> Other
-      </label>
-      <div class="modal-actions" style="margin-top:16px;">
-        <button class="btn-cancel" onclick="closeReportModal()">Cancel</button>
-        <button class="btn-save" style="background:#ca4754;" onclick="submitReport()">Submit Report</button>
-      </div>
-    </div>
-  </div>
-
-  <script>
-    /* =========================================================
-       Speed Typing Test — Client Script
-       ========================================================= */
-
-    /* ---------- 0) 전역 에러 표시 (원인 추적용) ---------- */
-    window.onerror = function (msg, src, line, col) {
-      try {
-        const box = document.getElementById('statusMessage');
-        if (box) box.innerText = `❌ JS Error: ${msg} (line ${line}:${col})`;
-      } catch (e) {}
-      return false;
-    };
-
-    /* ---------- 1) 널 세이프 DOM 헬퍼 ---------- */
-    function el(id) { return document.getElementById(id); }
-    function setText(id, text) { const n = el(id); if (n) n.innerText = text; }
-    function setHTML(id, html) { const n = el(id); if (n) n.innerHTML = html; }
-    function setDisplay(id, value) { const n = el(id); if (n) n.style.display = value; }
-    function setClassName(id, value) { const n = el(id); if (n) n.className = value; }
-    function addCls(id, cls) { const n = el(id); if (n) n.classList.add(cls); }
-    function removeCls(id, cls) { const n = el(id); if (n) n.classList.remove(cls); }
-    function toggleCls(id, cls, force) { const n = el(id); if (n) n.classList.toggle(cls, force); }
-    function on(id, evt, handler) { const n = el(id); if (n) n.addEventListener(evt, handler); }
-
-    /* ---------- 2) 소켓 초기화 (로드 실패 방어) ---------- */
-    let socket = null;
-    if (typeof io === 'undefined') {
-      setText('statusMessage', '❌ socket.io 스크립트를 불러오지 못했습니다. (/socket.io/socket.io.js 확인)');
-      setText('myNameDisplay', 'Offline');
+    if (nc1 !== nc2) {
+      winnerId = nc1 > nc2 ? id1 : id2;
     } else {
-      try {
-        socket = io();
-      } catch (e) {
-        setText('statusMessage', '❌ 서버 연결 초기화 실패: ' + e.message);
+      const bothFinished = p1.finished && p2.finished;
+      const oneFinished = p1.finished || p2.finished;
+
+      if (bothFinished) {
+        if (p1.finishTime !== p2.finishTime) {
+          winnerId = p1.finishTime < p2.finishTime ? id1 : id2;
+        } else {
+          winnerId = null;
+        }
+      } else if (oneFinished) {
+        winnerId = p1.finished ? id1 : id2;
+      } else {
+        winnerId = null;
       }
     }
-    // socket이 null이어도 나머지 코드가 죽지 않도록 감싸는 래퍼
-    function emit(event, payload) { if (socket) socket.emit(event, payload); }
-    function sub(event, handler) { if (socket) socket.on(event, handler); }
+  }
 
-    const LINE_HEIGHT = 38;
+  let ratingChanges = {};
+  if (room.isRanked && !room.invalidated && winnerId !== null) {
+    const loserId = ids.find(id => id !== winnerId);
+    const wRating = userRatings[winnerId] || 1000;
+    const lRating = userRatings[loserId] || 1000;
 
-    // 실전 모드(서버)와 동일한 텍스트 생성 로직을 클라이언트에 이식 (연습모드용)
-    // ★ 단어 풀: 총 300개 (중복 없음). server.js의 timeModeWordPool 배열과 반드시 동일해야 한다.
-    const timeModeWordPool = [
-      "the", "be", "to", "of", "and", "a", "in", "that", "have", "it",
-      "for", "not", "on", "with", "he", "as", "you", "do", "at", "this",
-      "but", "his", "by", "from", "they", "we", "say", "her", "she", "or",
-      "an", "will", "my", "one", "all", "would", "there", "their", "what", "so",
-      "up", "out", "if", "about", "who", "get", "which", "go", "me", "when",
-      "make", "can", "like", "time", "no", "just", "him", "know", "take", "people",
-      "into", "year", "your", "good", "some", "could", "them", "see", "other", "than",
-      "then", "now", "look", "only", "come", "its", "over", "think", "also", "back",
-      "after", "use", "two", "how", "our", "work", "first", "well", "way", "even",
-      "new", "want", "because", "any", "these", "give", "day", "most", "us", "code",
-      "program", "system", "run", "fast", "type", "keyboard", "match", "win", "play", "speed",
-      "man", "find", "here", "thing", "tell", "many", "very", "through", "should", "call",
-      "world", "school", "still", "try", "last", "ask", "need", "too", "feel", "three",
-      "state", "never", "become", "between", "high", "really", "something", "another", "family", "own",
-      "leave", "put", "old", "while", "mean", "keep", "student", "why", "let", "great",
-      "same", "big", "group", "begin", "seem", "country", "help", "talk", "turn", "problem",
-      "every", "start", "hand", "might", "show", "part", "against", "place", "such", "again",
-      "few", "case", "week", "company", "where", "must", "right", "study", "book", "eye",
-      "job", "word", "though", "business", "issue", "side", "kind", "four", "head", "far",
-      "black", "long", "both", "little", "house", "since", "provide", "service", "around", "friend",
-      "important", "father", "sit", "away", "until", "power", "hour", "game", "often", "yet",
-      "line", "end", "among", "ever", "stand", "bad", "lose", "however", "member", "pay",
-      "law", "meet", "car", "city", "almost", "include", "continue", "set", "later", "community",
-      "much", "name", "five", "once", "white", "least", "learn", "real", "change", "team",
-      "minute", "best", "several", "idea", "body", "information", "nothing", "lead", "social", "understand",
-      "whether", "watch", "together", "follow", "parent", "stop", "face", "anything", "create", "public",
-      "already", "speak", "others", "read", "level", "allow", "add", "office", "spend", "door",
-      "health", "person", "art", "sure", "history", "within", "grow", "result", "open", "morning",
-      "walk", "reason", "low", "research", "early", "food", "before", "moment", "himself", "air",
-      "teacher", "force", "offer", "enough", "education", "across", "although", "remember", "foot", "second"
-    ];
+    const { newWinnerRating, newLoserRating } = calculateNewRatings(wRating, lRating);
+    userRatings[winnerId] = newWinnerRating;
+    userRatings[loserId] = newLoserRating;
 
-    // 안전장치: 단어 풀이 300개가 아니거나 중복이 있으면 콘솔에 경고한다.
-    if (timeModeWordPool.length !== 300 || new Set(timeModeWordPool).size !== timeModeWordPool.length) {
-      console.warn('[WordPool] 경고: 단어 수=' + timeModeWordPool.length + ', 고유 단어 수=' + new Set(timeModeWordPool).size + ' (300개/중복 없음이어야 함)');
+    ratingChanges[winnerId] = { old: wRating, new: newWinnerRating, diff: newWinnerRating - wRating };
+    ratingChanges[loserId] = { old: lRating, new: newLoserRating, diff: newLoserRating - lRating };
+  }
+
+  let winnerUnlock = null;
+  if (!room.isRanked && !room.invalidated && winnerId !== null) {
+    const winnerSocket = io.sockets.sockets.get(winnerId);
+    if (winnerSocket) winnerUnlock = addNormalWin(winnerSocket);
+  }
+
+  const trophyChanges = {};
+  if (!room.isRanked) {
+    // ★ Casual(일반 매치 / 커스텀 룸): 승패와 무관하게 트로피·MMR 변동 없음 (diff 0)
+    ids.forEach((id) => {
+      trophyChanges[id] = { new: userTrophies[id] || 0, diff: 0 };
+    });
+  } else if (!room.invalidated) {
+    ids.forEach((id) => {
+      const res = winnerId === null ? 'draw' : (winnerId === id ? 'win' : 'lose');
+      const change = getTrophyChange(res, room.duration, room.isRanked);
+      userTrophies[id] = Math.max(0, (userTrophies[id] || 0) + change);
+      trophyChanges[id] = { new: userTrophies[id], diff: change };
+      const playerSocketForTrophy = io.sockets.sockets.get(id);
+      if (playerSocketForTrophy) persistTrophies(playerSocketForTrophy);
+    });
+  } else {
+    console.log(`[Anti-Abuse] Match rewards invalidated: ${roomId}`);
+  }
+
+  if (room.isRanked) {
+    ids.forEach((id) => {
+      const sock = io.sockets.sockets.get(id);
+      if (sock) persistRatings(sock);
+    });
+  }
+
+  // [진단 로그] 이 판이 Ranked였는지, 트로피 변동이 얼마였는지 서버 콘솔에서 바로 확인할 수 있다.
+  console.log(`[EndGame] room=${roomId} isRanked=${room.isRanked} invalidated=${!!room.invalidated} trophyDiffs=${JSON.stringify(Object.fromEntries(ids.map((id) => [id, trophyChanges[id] ? trophyChanges[id].diff : null])))}`);
+
+  ids.forEach((id) => {
+    const oppId = ids.find((x) => x !== id);
+    const playerSocket = io.sockets.sockets.get(id);
+    const oppSocket = io.sockets.sockets.get(oppId);
+    const oppPlayerId = oppSocket && oppSocket.data ? oppSocket.data.playerId : null;
+
+    io.to(id).emit('gameOver', {
+      result: winnerId === null ? 'draw' : (winnerId === id ? 'win' : 'lose'),
+      myStats: room.players[id],
+      opponentStats: room.players[oppId],
+      ratingData: room.isRanked ? ratingChanges[id] : null,
+      trophyData: trophyChanges[id],
+      unlock: playerSocket ? unlockPayload(playerSocket) : null,
+      justUnlocked: !!(winnerUnlock && winnerId === id && winnerUnlock.justUnlocked),
+      invalidated: !!room.invalidated,
+      opponentId: oppPlayerId,
+      opponentName: userNames[oppId] || 'Opponent',
+      reason: reason,
+      cheatReason: cheatReason,
+      disqualified: cheaterId === id,
+      roomId: roomId,
+      isRanked: !!room.isRanked
+    });
+  });
+
+  // 재경기 요청을 위해 방금 끝난 매치업 정보를 잠시 보관한다 (양쪽 모두 연결 상태일 때만).
+  if (ids.every((id) => { const s = io.sockets.sockets.get(id); return s && s.connected; })) {
+    recentMatches[roomId] = { playerIds: ids.slice(), mode: room.mode, duration: room.duration, isRanked: room.isRanked };
+    setTimeout(() => { delete recentMatches[roomId]; }, RECENT_MATCH_TTL_MS);
+  }
+
+  delete rooms[roomId];
+}
+
+function sendInitUser(socket) {
+  const rankTag = buildRankTagForSocket(socket.id);
+  const baseName = (userNames[socket.id] || '').replace(/\[[^\]]*\]\s*/g, '').trim();
+  userNames[socket.id] = appendDynamicTag(baseName, rankTag);
+  socket.emit('initUser', {
+    playerId: socket.data.playerId || null, // 클라이언트가 localStorage에 그대로 저장할 확정 ID
+    rating: userRatings[socket.id],
+    trophies: userTrophies[socket.id],
+    name: userNames[socket.id],
+    avatar: userAvatars[socket.id],
+    allowedAvatars: ALLOWED_AVATARS,
+    ...unlockPayload(socket),
+    rankTag: rankTag
+  });
+}
+
+io.on('connection', (socket) => {
+  runSeasonResets();
+
+  userRatings[socket.id] = userRatings[socket.id] || 1000;
+  userAvatars[socket.id] = userAvatars[socket.id] || DEFAULT_AVATAR;
+  userNormalWins[socket.id] = userNormalWins[socket.id] || 0;
+  userTrophies[socket.id] = userTrophies[socket.id] || 0;
+
+  userNames[socket.id] = userNames[socket.id] || 'Connecting...';
+
+  sendInitUser(socket);
+
+  // 클라이언트가 playerId를 보내면 기존 계정 데이터 복구 + 닉네임 재전송.
+  // playerId가 없거나 유효하지 않으면 서버가 새로 발급해서 클라이언트에 내려준다.
+  socket.on('identify', (data) => {
+    data = data || {};
+    let playerId = sanitizePlayerId(data.playerId);
+
+    if (!playerId) {
+      playerId = generatePlayerNick(generatePlayerCode());
     }
+    socket.data.playerId = playerId;
 
-    function isEasyTransition(prevWord, nextWord) {
-      if (!prevWord) return false;
-      if (prevWord === nextWord) return true;
-      if (prevWord.length <= 3 && nextWord.length <= 3) return true;
-      if (prevWord[prevWord.length - 1] === nextWord[0]) return true;
-      return false;
-    }
-
-    function pickNextWord(pool, prevWord) {
-      const candidates = pool.filter(w => !isEasyTransition(prevWord, w));
-      const source = candidates.length > 0 ? candidates : pool;
-      return source[Math.floor(Math.random() * source.length)];
-    }
-
-    function generateRandomText(targetWordCount) {
-      const words = [];
-      let prevWord = null;
-      for (let i = 0; i < targetWordCount; i++) {
-        const word = pickNextWord(timeModeWordPool, prevWord);
-        words.push(word);
-        prevWord = word;
+    // 동일 계정 중복 접속 차단: 먼저 접속해 있던 세션을 강제 종료(Kick)한다.
+    const existingSocketId = playerIdToSocket[playerId];
+    if (existingSocketId && existingSocketId !== socket.id) {
+      const existingSocket = io.sockets.sockets.get(existingSocketId);
+      if (existingSocket && existingSocket.connected) {
+        existingSocket.emit('sessionReplaced');
+        setTimeout(() => { try { existingSocket.disconnect(true); } catch (e) {} }, 100);
+        console.log(`[Anti-Abuse] Duplicate session kicked: ${playerId}`);
       }
-      return words.join(' ');
+    }
+    playerIdToSocket[playerId] = socket.id;
+
+    userNormalWins[socket.id] = accountNormalWins[playerId] || 0;
+    userRatings[socket.id] = accountRatings[playerId] || userRatings[socket.id];
+    userTrophies[socket.id] = accountTrophies[playerId] || 0;
+
+    // 기존 닉네임이 있으면 복구. 없으면 playerId 자체를 표시 닉네임으로 사용한다.
+    if (accountNames[playerId]) {
+      userNames[socket.id] = accountNames[playerId];
+    } else {
+      const nick = /^Player #/i.test(playerId) ? playerId : generatePlayerNick(playerId);
+      accountNames[playerId] = nick;
+      userNames[socket.id] = nick;
     }
 
-    function timeModeWordCount(duration) {
-      return Math.max(200, Math.ceil(duration * 6));
-    }
-    const PRACTICE_WORD_COUNT = timeModeWordCount(60);
+    // 랭킹 태그 재생성 + playerId 포함해서 클라이언트에 전달
+    sendInitUser(socket);
+    socket.emit('unlockStatus', unlockPayload(socket));
+    socket.emit('trophyUpdate', { trophies: userTrophies[socket.id] });
+  });
 
-    function generatePracticeText(previousText) {
-      let text = generateRandomText(PRACTICE_WORD_COUNT);
-      let attempts = 0;
-      while (text === previousText && attempts < 10) {
-        text = generateRandomText(PRACTICE_WORD_COUNT);
-        attempts++;
+  socket.on('selectMode', (data) => {
+    data = data || {};
+    const isRanked = !!data.isRanked;
+    const mode = 'time';
+    const duration = ALLOWED_TIME_DURATIONS.includes(data.duration) ? data.duration : DEFAULT_TIME_DURATION;
+
+    if (isRanked && !isRankedUnlocked(socket)) {
+      socket.emit('rankedLocked', unlockPayload(socket));
+      return;
+    }
+
+    if (isRanked) {
+      const myRating = userRatings[socket.id];
+      const candidates = waitingRankedPlayers.filter(
+        p => p.socket.id !== socket.id && p.mode === mode && p.duration === duration && p.socket.connected && !isAbusivePair(p.socket, socket)
+      );
+
+      if (candidates.length > 0) {
+        candidates.sort((a, b) => Math.abs(a.rating - myRating) - Math.abs(b.rating - myRating));
+        const bestMatch = candidates[0];
+        const idx = waitingRankedPlayers.indexOf(bestMatch);
+        if (idx > -1) waitingRankedPlayers.splice(idx, 1);
+
+        startMatch(bestMatch.socket, socket, mode, duration, true);
+        clearPracticeSession(socket.id);
+        clearPracticeSession(bestMatch.socket.id);
+      } else {
+        waitingRankedPlayers.push({ socket, rating: myRating, mode, duration });
+        socket.emit('waiting', { isRanked: true });
       }
-      return text;
+    } else {
+      const matchKey = `time_${duration}`;
+      const queue = Array.isArray(waitingNormalPlayers[matchKey])
+        ? waitingNormalPlayers[matchKey]
+        : (waitingNormalPlayers[matchKey] = []);
+
+      for (let i = queue.length - 1; i >= 0; i--) {
+        if (!queue[i].connected) queue.splice(i, 1);
+      }
+
+      const oppIdx = queue.findIndex(
+        (s) => s.connected && s.id !== socket.id && !isAbusivePair(s, socket)
+      );
+
+      if (oppIdx > -1) {
+        const [opponent] = queue.splice(oppIdx, 1);
+        startMatch(opponent, socket, mode, duration, false);
+        clearPracticeSession(socket.id);
+        clearPracticeSession(opponent.id);
+      } else {
+        queue.push(socket);
+        socket.emit('waiting', { isRanked: false });
+      }
+    }
+  });
+
+  socket.on('progress', (data) => {
+    const room = rooms[socket.data.roomId];
+    if (!room || room.ended) return;
+    // ★ START 신호 전에 들어온 입력은 무시한다 (카운트다운 중 선입력/조작 방지)
+    if (!room.started) return;
+    const player = room.players[socket.id];
+    if (!player || player.finished || player.disqualified) return;
+
+    const { accuracy, charIndex, netCorrect, totalTyped, totalErrors } = sanitizeStat(data || {}, room.text.length);
+
+    // percent는 charIndex 기반으로 서버에서 재계산해 클라이언트 위조/오차를 방지한다.
+    const percent = room.text.length > 0
+      ? Math.min(100, Math.floor((charIndex / room.text.length) * 100))
+      : 0;
+
+    player.percent = percent;
+    player.charIndex = charIndex;
+    player.netCorrect = netCorrect;
+    player.totalTyped = totalTyped;
+    player.totalErrors = totalErrors;
+    // accuracy는 서버에서 총입력/누적오류 기반으로 재계산 (오타 1회면 영구 100% 불가 반영)
+    player.accuracy = totalTyped > 0
+      ? Math.max(0, Math.round(((totalTyped - totalErrors) / totalTyped) * 100))
+      : 100;
+
+    // --- Anti-Cheat 검증 ---
+    // 클라이언트가 보낸 keystroke 간격 배치를 반영한 뒤 매크로/정속 패턴과 지속 최고속도를 검사한다.
+    // 위반 감지 시 그 즉시 이 판을 종료하고 해당 플레이어를 몰수패 처리한다.
+    recordAntiCheatDeltas(player, (data && data.deltas) || []);
+    const cheatReason = detectMacroPattern(player) || detectSpeedLimit(player, room);
+    if (cheatReason) {
+      player.disqualified = true;
+      disqualifyPlayer(socket.data.roomId, socket.id, cheatReason);
+      return;
     }
 
-    /* ---------- 3) 전역 상태 ---------- */
-    let isRanked = false;
-    let currentMode = 'time';
-    let currentDuration = null;
-    let sampleText = "";
-    let duration = null;
-    let gameTimerInterval = null;
-    let gameEnded = false;
+    // 100% 완주 시 자동으로 playerFinished 처리
 
-    // ★ 서버 주도 카운트다운 상태 — 클라이언트는 Date.now()로 시작 시각을 계산하지 않는다.
-    let matchActive = false;   // gameStart 수신 후 ~ gameOver/opponentLeft 전까지 true
-    let inGame = false;        // 서버 START 신호를 받아 실제로 타이핑이 가능한 상태
-    let typingLocked = false;  // 문장 완료 / 시간 종료로 의도적으로 입력을 잠근 상태
-    let localEndAt = null;     // START 수신 시점부터 performance.now()로 잰 "상대적" 종료 시각
-    let inputWatchdog = null;
-    let pendingTick = null;    // gameStart보다 먼저 도착한 countdownTick 보관용
-    let urlRoomHandled = false; // ?room= 파라미터 자동 입장은 한 번만
+    if (percent >= 100 && !player.finished) {
+      player.finished = true;
+      player.finishTime = Date.now();
+      socket.to(socket.data.roomId).emit('opponentProgress', {
+        percent: player.percent, accuracy: player.accuracy,
+        charIndex: player.charIndex,
+        netCorrect: player.netCorrect, totalTyped: player.totalTyped, totalErrors: player.totalErrors
+      });
+      endGame(socket.data.roomId, socket.id);
+      return;
+    }
 
-    let myRating = 1000;
-    let myTrophies = 0;
-    let myName = '';
-    let myAvatar = '😀';
-    let normalWins = 0;
-    let requiredUnlockWins = 3;
-    let rankedUnlocked = false;
+    socket.to(socket.data.roomId).emit('opponentProgress', {
+      percent: player.percent, accuracy: player.accuracy,
+      charIndex: player.charIndex,
+      netCorrect: player.netCorrect, totalTyped: player.totalTyped, totalErrors: player.totalErrors
+    });
+  });
 
-    let totalTyped = 0;
-    let totalErrors = 0;
-    let prevVal = "";
-    let myCaretEl = null;
-    let oppCaretEl = null;
+  socket.on('createRoom', (data) => {
+    data = data || {};
+    const mode = 'time';
+    const duration = ALLOWED_TIME_DURATIONS.includes(data.duration) ? data.duration : DEFAULT_TIME_DURATION;
+    let code;
+    do { code = generateRoomCode(); } while (customRooms[code]);
+    customRooms[code] = { mode, duration, isRanked: false, players: [socket] };
+    socket.join(code);
+    socket.data.customRoomCode = code;
+    socket.emit('roomCreated', { code, mode, duration });
+  });
 
-    let isCreatingPrivateRoom = false;
-    let privateRoomCode = null;
-    let isPrivateRoomMatch = false;   // 커스텀룸(친선) 경기 여부
-    let isQueueWaiting = false;       // 서버 매칭 대기열에 들어가 있는 상태
+  socket.on('joinRoom', (data) => {
+    data = data || {};
+    const code = (data.code || '').toUpperCase().trim();
+    if (!code || !customRooms[code]) {
+      socket.emit('roomError', { message: 'Invalid room code.' });
+      return;
+    }
+    const room = customRooms[code];
+    if (room.players.length >= 2) {
+      socket.emit('roomError', { message: 'Room is full.' });
+      return;
+    }
+    const hostSocket = room.players[0];
+    if (hostSocket && hostSocket.data.playerId && hostSocket.data.playerId === socket.data.playerId) {
+      socket.emit('roomError', { message: 'You cannot join your own room.' });
+      return;
+    }
+    room.players.push(socket);
+    socket.join(code);
+    socket.data.customRoomCode = code;
+    socket.emit('roomJoined', { code });
+    room.players[0].emit('roomOpponentJoined');
 
-    // Practice Mode 상태 — 매치와 동일한 입력 로직을 공유하며, 시간 제한만 없다.
-    const practice = {
-      active: false,
-      origin: null           // 'menu' | 'queue' — 종료 시 돌아갈 화면만 결정한다
+    // ★ 커스텀룸도 일반 매치와 동일하게 서버 주도 카운트다운(countdownTick)을 사용한다.
+    //   기존처럼 3초를 별도로 기다린 뒤 startMatch를 호출하면 카운트다운이 이중(3초 + 3초)이 되므로,
+    //   여기서는 화면 전환 신호만 보내고 즉시 매치를 시작한다.
+    io.to(code).emit('customRoomCountdown', { seconds: COUNTDOWN_SECONDS });
+
+    const [host, guest] = customRooms[code].players;
+    delete customRooms[code];
+    startMatch(host, guest, room.mode, room.duration, room.isRanked, code);
+  });
+
+  socket.on('cancelRoom', () => {
+    const code = socket.data.customRoomCode;
+    if (code && customRooms[code]) {
+      const room = customRooms[code];
+      room.players = room.players.filter(p => p.id !== socket.id);
+      if (room.players.length === 0) {
+        delete customRooms[code];
+      } else {
+        room.players[0].emit('roomError', { message: 'Opponent left the room.' });
+      }
+    }
+    socket.data.customRoomCode = null;
+  });
+
+  socket.on('requestLeaderboard', (data) => {
+    data = data || {};
+    const sortBy = data.sortBy || 'rank';
+
+    const rankSortKind = sortBy === 'trophy' ? 'trophy' : 'rating';
+    const topList = buildTopRankList(rankSortKind); // ★ 계정 단위로 정렬된 리스트를 그대로 재사용
+
+    const myId = socket.data && socket.data.playerId;
+    const entries = topList.map((entry) => ({
+      playerId: entry.playerId,
+      name: accountNames[entry.playerId] || entry.playerId || 'Guest',
+      avatar: DEFAULT_AVATAR,
+      rating: entry.rating,
+      trophies: entry.trophies,
+      isMe: entry.playerId === myId
+    }));
+
+    // 내 계정이 상위 100위 밖이라 리스트에 없다면 별도로 채워서 내려준다(기존 동작 유지).
+    if (myId && !entries.some((e) => e.playerId === myId)) {
+      entries.push({
+        playerId: myId,
+        name: userNames[socket.id] || 'Guest',
+        avatar: userAvatars[socket.id] || DEFAULT_AVATAR,
+        rating: userRatings[socket.id] || 1000,
+        trophies: accountMonthlyTrophies[myId] || userTrophies[socket.id] || 0,
+        isMe: true
+      });
+    }
+
+    socket.emit('leaderboardData', { sortBy, entries: entries.slice(0, 50) });
+  });
+
+  socket.on('report_player', (data) => {
+    data = data || {};
+    const reporterId = socket.data && socket.data.playerId;
+    const targetId = data.targetPlayerId;
+    const roomId = data.roomId;
+    const reason = data.reason;
+
+    if (!reporterId || !targetId || !roomId || !reason) {
+      socket.emit('reportResult', { success: false, message: 'Missing required fields.' });
+      return;
+    }
+
+    if (reporterId === targetId) {
+      socket.emit('reportResult', { success: false, message: 'You cannot report yourself.' });
+      return;
+    }
+
+    if (!reportedInMatch[roomId]) reportedInMatch[roomId] = new Set();
+    if (reportedInMatch[roomId].has(reporterId)) {
+      socket.emit('reportResult', { success: false, message: 'You already reported in this match.' });
+      return;
+    }
+    reportedInMatch[roomId].add(reporterId);
+
+    const validReasons = ['cheating', 'inappropriate_name', 'other'];
+    const cleanReason = validReasons.includes(reason) ? reason : 'other';
+
+    let targetName = 'Unknown';
+    for (const [sid, s] of io.sockets.sockets) {
+      if (s.data && s.data.playerId === targetId) {
+        targetName = userNames[sid] || 'Unknown';
+        break;
+      }
+    }
+
+    const reportEntry = {
+      timestamp: new Date().toISOString(),
+      reporterId,
+      reporterName: userNames[socket.id] || 'Unknown',
+      targetId,
+      targetName,
+      roomId,
+      reason: cleanReason,
+      matchStats: data.matchStats || {}
     };
 
-    let lastOpponentId = null;
-    let lastRoomId = null;
-    let lastMatchStats = null;
-    let selectedReportReason = null;
-    const reportedMatchIds = new Set();
+    reportLogs.push(reportEntry);
+    console.log(`[Report] ${reportEntry.reporterName}(${reporterId}) reported ${reportEntry.targetName}(${targetId}) for "${cleanReason}" in room ${roomId}`);
 
-    let lastKeystrokeTime = null;
-    let pendingDeltas = [];
+    sendDiscordReportWebhook(reportEntry);
 
-    let rematchRoomId = null;
-    let rematchDeadline = null;
-    let rematchCountdownInterval = null;
-    let rematchRequestedByMe = false;
+    socket.emit('reportResult', { success: true, message: 'Report submitted. Thank you!' });
+  });
 
-    let currentView = 'play';
-    let currentLeaderboardTab = 'rank';
+  socket.on('requestSoloPractice', () => {
+    const text = generateUniqueText('practice', PRACTICE_TEXT_DURATION, socket.data.lastText || '');
+    socket.data.lastText = text;
+    soloPracticeSessions[socket.id] = { text };
+    socket.emit('soloPracticeStart', { text });
+  });
 
-    /* ---------- 3-B) (삭제됨) 서버 시계 동기화 ----------
-       카운트다운/시작은 서버의 countdownTick 이벤트로만 진행하므로
-       클라이언트-서버 시계 보정 로직이 필요 없다. */
+  socket.on('requestPracticeText', () => {
+    const session = soloPracticeSessions[socket.id];
+    if (!session) return;
+    const text = generateUniqueText('practice', PRACTICE_TEXT_DURATION, session.text);
+    session.text = text;
+    socket.data.lastText = text;
+    socket.emit('practiceText', { text });
+  });
 
-    /* ---------- 4) 공통 UI ---------- */
-    function setStatus(text) { setText('statusMessage', text || ''); }
-    function setTitle(text) { setText('title', text); }
+  socket.on('exitPractice', () => {
+    clearPracticeSession(socket.id);
+    socket.emit('practiceEnded');
+  });
 
-    function setLobbyVisible(visible) {
-      const lobby = el('lobbyHeader');
-      const tabs = el('headerTabs');
-      if (lobby) { if (visible) lobby.classList.remove('hidden'); else lobby.classList.add('hidden'); }
-      if (tabs) tabs.style.display = visible ? '' : 'none';
+  socket.on('leaveMatch', () => {
+    const roomId = socket.data.roomId;
+    const room = rooms[roomId];
+    if (!room || room.ended) return;
+    const remainingId = Object.keys(room.players).find((id) => id !== socket.id);
+    if (!remainingId) return;
+    endGame(roomId, remainingId, { reason: 'forfeit' });
+  });
+
+  // --- 재경기(Rematch) ---
+  socket.on('requestRematch', (data) => {
+    data = data || {};
+    const roomId = data.roomId;
+    const match = recentMatches[roomId];
+    if (!match || !match.playerIds.includes(socket.id)) {
+      socket.emit('rematchError', { message: 'Match no longer available for rematch.' });
+      return;
+    }
+    const oppId = match.playerIds.find((id) => id !== socket.id);
+    const oppSocket = oppId ? io.sockets.sockets.get(oppId) : null;
+    if (!oppSocket || !oppSocket.connected) {
+      socket.emit('rematchError', { message: 'Opponent is no longer available.' });
+      cleanupPendingRematch(roomId);
+      delete recentMatches[roomId];
+      return;
     }
 
-    function setQueueControlsVisible(visible) {
-      isQueueWaiting = !!visible && !isPrivateRoomMatch;
-      setDisplay('waitingControls', (isQueueWaiting && !practice.active) ? 'block' : 'none');
-    }
-
-    function hideQueueControls() {
-      isQueueWaiting = false;
-      setDisplay('waitingControls', 'none');
-    }
-
-    function showLobbyMenu() {
-      teardownPractice();
-      hideQueueControls();
-      setDisplay('roomWaiting', 'none');
-      setDisplay('gameArea', 'none');
-      setDisplay('modeSelect', 'flex');
-      setDisplay('typeTab', 'flex');
-      setDisplay('mainModeButtons', 'flex');
-      setLobbyVisible(true);
-      setTitle('Select Match Duration');
-    }
-
-    /* ---------- 5) 결과 화면 버튼 분기 ---------- */
-    function setPostMatchButtons() {
-      setDisplay('restartRow', 'block');
-      const rematchBtnEl = el('rematchBtn');
-      const findNextBtnEl = el('findNextBtn');
-      if (!rematchBtnEl || !findNextBtnEl) {
-        console.warn('[UI] rematchBtn 또는 findNextBtn 요소를 찾지 못했습니다.');
-        return;
-      }
-      if (isPrivateRoomMatch) {
-        rematchBtnEl.style.display = '';
-        findNextBtnEl.style.display = 'none';
-      } else {
-        rematchBtnEl.style.display = 'none';
-        findNextBtnEl.style.display = '';
-      }
-    }
-
-    /* ---------- 6) 언락 / 상단바 ---------- */
-    function applyUnlockStatus(data, options) {
-      if (!data) return;
-      const opts = options || {};
-      normalWins = Number.isFinite(data.normalWins) ? data.normalWins : normalWins;
-      requiredUnlockWins = Number.isFinite(data.requiredWins) ? data.requiredWins : requiredUnlockWins;
-      rankedUnlocked = !!data.rankedUnlocked || normalWins >= requiredUnlockWins;
-
-      const ratio = requiredUnlockWins > 0
-        ? Math.min(100, Math.floor((normalWins / requiredUnlockWins) * 100))
-        : 100;
-
-      toggleCls('rankedTabBtn', 'locked', !rankedUnlocked);
-      setText('rankedLockLabel', rankedUnlocked ? '' : `🔒 Win ${requiredUnlockWins} Casual matches`);
-      setText('unlockCountLabel', rankedUnlocked ? 'Unlocked' : `${normalWins} / ${requiredUnlockWins} Wins`);
-      const bar = el('unlockBarFill');
-      if (bar) bar.style.width = `${ratio}%`;
-      toggleCls('unlockPanel', 'hidden', rankedUnlocked && !opts.keepPanel);
-
-      if (rankedUnlocked && isRanked === false) removeCls('rankedTabBtn', 'active');
-      if (!rankedUnlocked && isRanked) switchMatchKind(false, true);
-
-      if (data.justUnlocked || opts.justUnlocked) {
-        setStatus(`🎉 ${requiredUnlockWins} Casual wins! Ranked is now unlocked.`);
-        removeCls('unlockPanel', 'hidden');
-        setText('unlockCountLabel', 'Unlocked');
-      }
-    }
-
-    function updateTopBar() {
-      setText('myRatingDisplay', myRating);
-      setText('myNameDisplay', myName || 'Connecting...');
-      setText('myAvatarBadge', myAvatar || '😀');
-      setText('myTrophyDisplay', myTrophies);
-    }
-
-    function switchMatchKind(ranked, silent) {
-      if (ranked && !rankedUnlocked) {
-        setStatus(`🔒 Ranked unlocks after ${requiredUnlockWins} Casual wins. (${normalWins}/${requiredUnlockWins})`);
-        return;
-      }
-      isRanked = ranked;
-      toggleCls('normalTabBtn', 'active', !ranked);
-      toggleCls('rankedTabBtn', 'active', ranked);
-      if (!silent) setStatus('');
-    }
-
-    /* ---------- 7) 접속 / 식별 ---------- */
-    function getOrCreatePlayerCode() {
-      const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
-      const makeCode = () => {
-        let result = '';
-        for (let i = 0; i < 6; i++) result += chars.charAt(Math.floor(Math.random() * chars.length));
-        return result;
+    let pending = pendingRematches[roomId];
+    if (!pending) {
+      pending = pendingRematches[roomId] = {
+        accepted: new Set(),
+        timeoutId: setTimeout(() => {
+          match.playerIds.forEach((id) => {
+            const s = io.sockets.sockets.get(id);
+            if (s) s.emit('rematchTimeout');
+          });
+          cleanupPendingRematch(roomId);
+          delete recentMatches[roomId];
+        }, REMATCH_TIMEOUT_MS)
       };
-      try {
-        let id = localStorage.getItem('player_id');
-        if (!id || !/^[A-Z0-9]{6}$/.test(id)) {
-          id = makeCode();
-          localStorage.setItem('player_id', id);
-        }
-        return id;
-      } catch (e) {
-        return makeCode();
-      }
     }
 
-    sub('connect', () => {
-      emit('identify', { playerId: 'Player #' + getOrCreatePlayerCode() });
-      fetchLeaderboard();
-      checkUrlRoomParam();
-    });
+    const alreadyRequestedByOpp = pending.accepted.has(oppSocket.id);
+    pending.accepted.add(socket.id);
 
-    sub('connect_error', (err) => {
-      setStatus('⚠️ 서버 연결 실패: ' + (err && err.message ? err.message : 'unknown'));
-    });
-
-    sub('disconnect', () => {
-      setStatus('⚠️ Disconnected from server. Reconnecting...');
-    });
-
-    sub('initUser', (data) => {
-      if (!data) return;
-      myRating = data.rating;
-      myTrophies = data.trophies || 0;
-      if (data.name) myName = data.name;
-      if (data.avatar) myAvatar = data.avatar;
-      applyUnlockStatus(data);
-
-      if (data.name) {
-        const code = data.name.replace(/^Player #/, '').replace(/\s*\[.*\]\s*$/, '').trim();
-        if (/^[A-Z0-9]{6}$/.test(code)) {
-          try { localStorage.setItem('player_id', code); } catch (e) {}
-        }
-      }
-      updateTopBar();
-      fetchLeaderboard();
-    });
-
-    sub('unlockStatus', (data) => {
-      applyUnlockStatus(data, { justUnlocked: !!(data && data.justUnlocked) });
-    });
-
-    sub('trophyUpdate', (data) => {
-      if (!data) return;
-      myTrophies = data.trophies;
-      updateTopBar();
-    });
-
-    sub('rankedLocked', (data) => {
-      applyUnlockStatus(data);
-      isRanked = false;
-      addCls('normalTabBtn', 'active');
-      removeCls('rankedTabBtn', 'active');
-      isCreatingPrivateRoom = false;
-      isPrivateRoomMatch = false;
-      showLobbyMenu();
-      setStatus(`🔒 Ranked unlocks after ${requiredUnlockWins} Casual wins. (${normalWins}/${requiredUnlockWins})`);
-    });
-
-    sub('sessionReplaced', () => {
-      gameEnded = true;
-      matchActive = false;
-      inGame = false;
-      typingLocked = true;
-      teardownPractice();
-      const ti = el('typingInput');
-      if (ti) ti.disabled = true;
-      hideQueueControls();
-      setDisplay('gameArea', 'none');
-      removeCls('roomCodeModal', 'show');
-      removeCls('reportModalOverlay', 'show');
-      setTitle('Session replaced');
-      setStatus('⚠️ Other session connected — this tab has been disconnected.');
-      alert('Other session connected.\nThis tab has been disconnected because the same account is now active elsewhere.');
-    });
-
-    /* ---------- 8) 뷰 / 리더보드 ---------- */
-    function switchView(view) {
-      currentView = view;
-      document.querySelectorAll('.header-tab').forEach((btn) => {
-        btn.classList.toggle('active', btn.dataset.view === view);
-      });
-      toggleCls('playView', 'active', view === 'play');
-      toggleCls('rankView', 'active', view === 'rank');
-      toggleCls('trophyView', 'active', view === 'trophy');
-      if (view === 'rank' || view === 'trophy') {
-        currentLeaderboardTab = view;
-        fetchLeaderboard();
-      }
+    if (!alreadyRequestedByOpp) {
+      oppSocket.emit('rematchRequested', { roomId });
     }
 
-    function fetchLeaderboard() {
-      if (!socket || !socket.connected) return;
-      emit('requestLeaderboard', { sortBy: currentLeaderboardTab });
-    }
-
-    sub('leaderboardData', (data) => {
-      if (!data) return;
-      const targetId = data.sortBy === 'rank' ? 'rankLeaderboard' : 'trophyLeaderboard';
-      if (!el(targetId)) return;
-      if (!data.entries || data.entries.length === 0) {
-        setHTML(targetId, '<div class="lb-empty">No records yet.</div>');
-        return;
-      }
-      const medals = ['🥇', '🥈', '🥉'];
-      let html = '';
-      data.entries.forEach((entry, idx) => {
-        const rank = idx + 1;
-        const rankDisplay = rank <= 3 ? `${medals[rank - 1]} #${rank}` : `#${rank}`;
-        const rowClass = 'lb-row'
-          + (entry.isMe ? ' me' : '')
-          + (rank === 1 ? ' top1' : rank === 2 ? ' top2' : rank === 3 ? ' top3' : '');
-        const score = data.sortBy === 'rank' ? entry.rating : entry.trophies;
-        html += `<div class="${rowClass}">`
-          + `<span class="lb-rank">${rankDisplay}</span>`
-          + `<span class="lb-avatar">${entry.avatar}</span>`
-          + `<span class="lb-name">${entry.name}</span>`
-          + `<span class="lb-score">${score}</span>`
-          + `</div>`;
-      });
-      setHTML(targetId, html);
-    });
-
-    /* ---------- 9) 게임 초기화 / 매칭 ---------- */
-    function clearAllCountdowns() {
-      pendingTick = null;   // 카운트다운은 서버가 주도하므로 로컬 인터벌이 없다
-    }
-
-    function resetGameState() {
-      clearAllCountdowns();
-      clearInterval(gameTimerInterval);
-      clearRematchState();
-      teardownPractice();
-      gameEnded = false;
-
-      // 안전장치 상태 초기화
-      matchActive = false;
-      inGame = false;
-      typingLocked = false;
-      localEndAt = null;
-
-      lastKeystrokeTime = null;
-      pendingDeltas = [];
-      totalTyped = 0;
-      totalErrors = 0;
-      prevVal = "";
-
-      const timerEl = el('timer');
-      if (timerEl && timerEl.parentElement) timerEl.parentElement.style.display = '';
-
-      const ti = el('typingInput');
-      if (ti) { ti.value = ''; ti.disabled = true; }
-
-      const qd = el('quoteDisplay');
-      if (qd) { qd.innerHTML = ''; qd.style.transform = 'translateY(0px)'; }
-
-      addCls('matchupBar', 'hidden-state');
-      setDisplay('practiceExitRow', 'none');
-      setDisplay('leaveMatchRow', 'none');
-    }
-
-    function enterQueueUI() {
-      setDisplay('modeSelect', 'none');
-      setDisplay('typeTab', 'none');
-      setDisplay('roomWaiting', 'none');
-      setLobbyVisible(false);
-      setTitle('Finding opponent...');
-      setStatus(isRanked ? 'Searching for a similar rank...' : 'Looking for an opponent...');
-      setQueueControlsVisible(true);
-    }
-
-    function selectMode(mode, selectedDuration) {
-      resetGameState();
-      currentMode = mode;
-      currentDuration = mode === 'time' ? selectedDuration : null;
-
-      if (isCreatingPrivateRoom) {
-        isCreatingPrivateRoom = false;
-        isPrivateRoomMatch = true;
-        hideQueueControls();
-        emit('createRoom', { mode, duration: currentDuration });
-        return;
-      }
-
-      isPrivateRoomMatch = false;
-      emit('selectMode', { mode, duration: currentDuration, isRanked });
-      enterQueueUI();
-    }
-
-    function findNextMatch() {
-      if (rematchRoomId) emit('declineRematch', { roomId: rematchRoomId });
-      resetGameState();
-      isPrivateRoomMatch = false;
-      setHTML('resultBanner', '');
-      setClassName('resultBanner', 'result-banner');
-      setDisplay('restartRow', 'none');
-      setDisplay('gameArea', 'none');
-      enterQueueUI();
-      emit('selectMode', { mode: currentMode, duration: currentDuration, isRanked });
-    }
-
-    function cancelSearch() {
-      emit('cancelSearch');
-      isPrivateRoomMatch = false;
-      isCreatingPrivateRoom = false;
-      resetGameState();
-      setHTML('resultBanner', '');
-      setClassName('resultBanner', 'result-banner');
-      setDisplay('restartRow', 'none');
-      showLobbyMenu();
-      setStatus('');
-      applyUnlockStatus({ normalWins, requiredWins: requiredUnlockWins, rankedUnlocked });
-    }
-
-    function leaveCurrentMatch() {
-      if (gameEnded || practice.active) return;
-      if (!confirm('Leave this match? This will count as a forfeit (loss).')) return;
-      emit('leaveMatch');
-      setDisplay('leaveMatchRow', 'none');
-    }
-
-    sub('waiting', (data) => {
-      setQueueControlsVisible(true);
-      setStatus((data && data.isRanked) ? 'Searching for a similar rank...' : 'Looking for an opponent...');
-    });
-
-    // 매치 확정 계열 이벤트 — 연습 중이면 연습을 즉시 종료하고 대기열 영역을 숨긴다.
-    // ★ 카운트다운 숫자는 오직 서버의 'countdownTick' 이벤트로만 표시한다.
-    sub('matchFound', () => {
-      abortPracticeForMatch();
-      hideQueueControls();
-      setTitle('Opponent found!');
-    });
-    // (구버전 서버 호환용) 화면 전환만 하고 텍스트는 건드리지 않는다.
-    sub('countdown', () => {
-      abortPracticeForMatch();
-      hideQueueControls();
-    });
-
-    /* ---------- 10) 커스텀 룸 ---------- */
-    function startPrivateRoom() {
-      isCreatingPrivateRoom = true;
-      setStatus('Select duration for custom room');
-      setDisplay('mainModeButtons', 'flex');
-    }
-
-    function joinPrivateRoom() {
-      const input = el('inviteCodeInput');
-      const code = input ? input.value.toUpperCase().trim() : '';
-      if (!code || code.length < 4) {
-        setStatus('Please enter a valid room code.');
-        return;
-      }
-      isPrivateRoomMatch = true;
-      emit('joinRoom', { code });
-      setStatus('Joining room...');
-      hideQueueControls();
-      setDisplay('modeSelect', 'none');
-      setDisplay('typeTab', 'none');
-      setLobbyVisible(false);
-      setTitle('Joining room...');
-    }
-
-    function cancelPrivateRoom() {
-      emit('cancelRoom');
-      privateRoomCode = null;
-      isPrivateRoomMatch = false;
-      isCreatingPrivateRoom = false;
-      try { history.replaceState(null, '', window.location.pathname); } catch (e) {}
-      setDisplay('copyInviteLinkBtn', 'none');
-      showLobbyMenu();
-      setStatus('');
-    }
-
-    function closeRoomModal() { removeCls('roomCodeModal', 'show'); }
-
-    function buildInviteUrl() {
-      return window.location.origin + window.location.pathname + '?room=' + privateRoomCode;
-    }
-
-    function fallbackCopy(text, done) {
-      const ta = document.createElement('textarea');
-      ta.value = text;
-      ta.style.position = 'fixed';
-      ta.style.opacity = '0';
-      document.body.appendChild(ta);
-      ta.select();
-      try { document.execCommand('copy'); if (done) done(); } catch (e) {}
-      document.body.removeChild(ta);
-    }
-
-    function copyInviteLinkToClipboard() {
-      if (!privateRoomCode) { setStatus('⚠️ No active room.'); return; }
-      const url = buildInviteUrl();
-      const done = () => setStatus('✅ Invite link copied!');
-      if (navigator.clipboard && navigator.clipboard.writeText) {
-        navigator.clipboard.writeText(url).then(done).catch(() => fallbackCopy(url, done));
+    if (pending.accepted.size === 2) {
+      clearTimeout(pending.timeoutId);
+      delete pendingRematches[roomId];
+      delete recentMatches[roomId];
+      const p1 = io.sockets.sockets.get(match.playerIds[0]);
+      const p2 = io.sockets.sockets.get(match.playerIds[1]);
+      if (p1 && p1.connected && p2 && p2.connected) {
+        startMatch(p1, p2, match.mode, match.duration, match.isRanked);
       } else {
-        fallbackCopy(url, done);
-      }
-    }
-
-    function copyInviteLink() {
-      if (!privateRoomCode) { setStatus('⚠️ No active room.'); return; }
-      const url = buildInviteUrl();
-      const done = () => setStatus('✅ Link copied!');
-      if (navigator.clipboard && navigator.clipboard.writeText) {
-        navigator.clipboard.writeText(url).then(done).catch(() => fallbackCopy(url, done));
-      } else {
-        fallbackCopy(url, done);
-      }
-    }
-
-    // ★ ?room=CODE 자동 입장은 최초 1회만 실행한다.
-    //   소켓이 재연결(connect 재발생)될 때마다 joinRoom을 다시 보내
-    //   진행 중인 매치 화면을 덮어쓰는 것을 방지한다.
-    function checkUrlRoomParam() {
-      if (urlRoomHandled || matchActive || inGame) return;
-      const params = new URLSearchParams(window.location.search);
-      const roomCode = params.get('room');
-      if (!roomCode) return;
-      urlRoomHandled = true;
-      const input = el('inviteCodeInput');
-      if (input) input.value = roomCode.toUpperCase();
-      joinPrivateRoom();
-    }
-
-    sub('roomCreated', (data) => {
-      if (!data) return;
-      privateRoomCode = data.code;
-      isPrivateRoomMatch = true;
-      hideQueueControls();
-      try { history.replaceState(null, '', '?room=' + data.code); } catch (e) {}
-      setText('roomCodeDisplay', data.code);
-      addCls('roomCodeModal', 'show');
-      setText('roomWaitingCode', data.code);
-      setDisplay('roomWaiting', 'block');
-      setDisplay('copyInviteLinkBtn', 'inline-block');
-      setDisplay('modeSelect', 'none');
-      setDisplay('typeTab', 'none');
-      setLobbyVisible(false);
-      setTitle('Waiting in room...');
-      setStatus('');
-    });
-
-    sub('roomJoined', (data) => {
-      if (!data) return;
-      privateRoomCode = data.code;
-      isPrivateRoomMatch = true;
-      hideQueueControls();
-      setTitle('Opponent joining soon...');
-      setStatus('');
-    });
-
-    sub('roomOpponentJoined', () => { setStatus('Opponent joined the room!'); });
-
-    // ★ 커스텀룸 — 화면 전환만 담당한다. 3, 2, 1, START는 서버의 'countdownTick'이 처리한다.
-    sub('customRoomCountdown', () => {
-      closeRoomModal();
-      hideQueueControls();
-      setDisplay('roomWaiting', 'none');
-      setStatus('');
-      setDisplay('gameArea', 'block');
-      setDisplay('modeSelect', 'none');
-      setDisplay('typeTab', 'none');
-    });
-
-    sub('roomError', (data) => {
-      setStatus('⚠️ ' + ((data && data.message) || 'Room error'));
-      privateRoomCode = null;
-      isPrivateRoomMatch = false;
-      isCreatingPrivateRoom = false;
-      showLobbyMenu();
-    });
-
-    /* ---------- 11) 렌더링 / 캐럿 / 타이머 ---------- */
-    function renderQuote() {
-      const qd = el('quoteDisplay');
-      if (!qd) return;
-      qd.innerHTML = '';
-      sampleText.split('').forEach((char) => {
-        const span = document.createElement('span');
-        span.className = 'char';
-        span.innerText = char;
-        qd.appendChild(span);
-      });
-      myCaretEl = document.createElement('div');
-      myCaretEl.className = 'caret';
-      qd.appendChild(myCaretEl);
-      oppCaretEl = document.createElement('div');
-      oppCaretEl.className = 'caret opp-caret';
-      qd.appendChild(oppCaretEl);
-      positionCaret(myCaretEl, 0);
-      updateViewportScroll(0);
-    }
-
-    function positionCaret(caretEl, charIndex) {
-      if (!caretEl) return;
-      const spans = document.querySelectorAll('span.char');
-      if (spans.length === 0) return;
-      if (charIndex >= spans.length) {
-        const last = spans[spans.length - 1];
-        caretEl.style.transform = `translate(${last.offsetLeft + last.offsetWidth}px, ${last.offsetTop}px)`;
-      } else {
-        const target = spans[Math.max(0, charIndex)];
-        if (!target) return;
-        caretEl.style.transform = `translate(${target.offsetLeft}px, ${target.offsetTop}px)`;
-      }
-      caretEl.style.display = 'block';
-    }
-
-    function getRowForIndex(charIndex) {
-      const spans = document.querySelectorAll('span.char');
-      if (spans.length === 0) return 0;
-      const idx = Math.min(Math.max(0, charIndex), spans.length - 1);
-      return Math.round(spans[idx].offsetTop / LINE_HEIGHT);
-    }
-
-    function updateViewportScroll(row) {
-      const qd = el('quoteDisplay');
-      if (qd) qd.style.transform = `translateY(-${Math.max(0, row) * LINE_HEIGHT}px)`;
-    }
-
-    /* =========================================================
-       11-A) 서버 주도 카운트다운 + 입력창 활성화
-       ========================================================= */
-
-    // 포커스만 시도 (disabled면 아무 것도 하지 않음)
-    function focusTypingInput() {
-      const ti = el('typingInput');
-      if (!ti || ti.disabled) return;
-      try { ti.focus({ preventScroll: true }); } catch (e) { try { ti.focus(); } catch (e2) {} }
-    }
-
-    // disabled/readonly를 속성 레벨까지 확실히 제거하고 포커스를 준다.
-    function forceEnableTyping() {
-      const ti = el('typingInput');
-      if (!ti) return;
-      ti.disabled = false;
-      ti.readOnly = false;
-      ti.removeAttribute('disabled');
-      ti.removeAttribute('readonly');
-      focusTypingInput();
-    }
-
-    // ★ 서버 'countdownTick' 처리
-    //   - 숫자(3, 2, 1): 화면 텍스트만 갱신한다.
-    //   - 'START'(또는 0 / start:true): 입력창 해제 + 타이머 구동.
-    //   - payload는 { value: 3 } / { count: 3 } / 3 어느 형태든 받아준다.
-    function handleCountdownTick(data) {
-      if (gameEnded || practice.active) return;
-      if (!matchActive) { pendingTick = data; return; }   // gameStart보다 먼저 온 경우 보관
-      if (inGame) return;                                 // START 이후 늦게 온 틱은 무시
-
-      const raw = (data !== null && typeof data === 'object')
-        ? (data.value ?? data.count ?? data.seconds)
-        : data;
-      const isStart = (data && data.start === true)
-        || raw === 'START' || raw === 'start' || raw === 0 || raw === '0';
-
-      if (isStart) { enableTypingNow(); return; }
-
-      const n = Number(raw);
-      if (Number.isFinite(n) && n > 0) setTitle(`Starting in ${n}...`);
-    }
-
-    // ★ START 신호 수신 시점 단일 진입점 (여러 번 호출돼도 안전)
-    function enableTypingNow() {
-      if (gameEnded || practice.active) return;
-
-      if (inGame) {
-        if (!typingLocked) forceEnableTyping();
-        return;
-      }
-
-      inGame = true;
-      typingLocked = false;
-      setTitle('Start!');
-
-      forceEnableTyping();
-      // 렌더링/레이아웃 직후 포커스가 빠지는 경우를 대비한 재시도
-      requestAnimationFrame(focusTypingInput);
-      setTimeout(focusTypingInput, 60);
-      setTimeout(focusTypingInput, 250);
-
-      addCls('matchupBar', 'hidden-state');
-      setDisplay('leaveMatchRow', 'block');
-      startGameTimer();
-    }
-
-    // ★ 안전장치: START를 받은 뒤 어떤 이유로든 입력창이 잠겨 있으면(의도적 잠금 제외) 다시 풀어준다.
-    function ensureTypingEnabled() {
-      if (!matchActive || !inGame || gameEnded || practice.active || typingLocked) return;
-      const ti = el('typingInput');
-      if (ti && (ti.disabled || ti.readOnly)) forceEnableTyping();
-    }
-
-    function startInputWatchdog() {
-      clearInterval(inputWatchdog);
-      inputWatchdog = setInterval(ensureTypingEnabled, 120);
-    }
-
-    // ★ 게임 타이머 — START를 받은 순간부터 performance.now()로 "경과 시간"만 잰다.
-    //   서로 다른 PC의 절대 시각(Date.now)을 비교하지 않으므로 시계 오차의 영향이 없다.
-    //   실제 종료 판정은 서버가 한다.
-    function startGameTimer() {
-      clearInterval(gameTimerInterval);
-      localEndAt = performance.now() + (Number(duration) || 0) * 1000;
-
-      const update = () => {
-        const remaining = Math.max(0, Math.ceil((localEndAt - performance.now()) / 1000));
-        setText('timer', remaining);
-        if (remaining <= 0) {
-          clearInterval(gameTimerInterval);
-          typingLocked = true;
-          const ti = el('typingInput');
-          if (ti) ti.disabled = true;
-          // 타임아웃 시 서버로 별도 emit이 필요 없다: 서버가 자체 setTimeout으로 endGame()을 호출하며,
-          // 그때 쓰이는 netCorrect는 대전 내내 보낸 'progress' emit들로 이미 서버에 누적되어 있다.
-        }
-      };
-      update();
-      gameTimerInterval = setInterval(update, 200);
-    }
-
-    /* =========================================================
-       11-B) 타이핑 입력 — Practice와 매치가 완전히 동일한 로직을 공유한다.
-       · Practice: 타이머 없음, 문장을 다 치면 다음 문단으로 계속 진행, 서버 전송 없음.
-       · 매치: 서버 시간 제한, 문장을 다 치면 입력 잠금.
-       측정 지표는 Accuracy 하나뿐이다 (WPM 없음).
-       ========================================================= */
-
-    function showPracticeText(text) {
-      sampleText = text;
-      prevVal = '';
-      const ti = el('typingInput');
-      if (ti) ti.value = '';
-      renderQuote();
-      if (oppCaretEl) oppCaretEl.style.display = 'none';
-    }
-
-    function renderPracticeScreen(text) {
-      setDisplay('modeSelect', 'none');
-      setDisplay('typeTab', 'none');
-      setDisplay('roomWaiting', 'none');
-      setDisplay('waitingControls', 'none');
-      setDisplay('gameArea', 'block');
-      removeCls('roomCodeModal', 'show');
-      setLobbyVisible(false);
-
-      setTitle('Solo Practice — type as long as you want');
-      setStatus('');
-      setText('modeBadge', '[Solo Practice — No Time Limit]');
-      setHTML('resultBanner', '');
-      setClassName('resultBanner', 'result-banner');
-      setDisplay('restartRow', 'none');
-      setDisplay('leaveMatchRow', 'none');
-      addCls('matchupBar', 'hidden-state');
-
-      const timerEl = el('timer');
-      if (timerEl && timerEl.parentElement) timerEl.parentElement.style.display = 'none';
-      setText('accuracy', 100);
-      setDisplay('practiceExitRow', 'block');
-
-      showPracticeText(text);
-      forceEnableTyping();
-    }
-
-    function beginPractice(origin) {
-      resetGameState();
-      practice.active = true;
-      practice.origin = origin;
-      renderPracticeScreen(generatePracticeText(''));
-    }
-
-    function startPracticeMode() {
-      if (practice.active) return;
-      beginPractice('menu');
-    }
-
-    function enterSoloPractice() {
-      if (practice.active || !isQueueWaiting) return;
-      beginPractice('queue');
-    }
-
-    function teardownPractice() {
-      if (!practice.active) return;
-
-      practice.active = false;
-      practice.origin = null;
-
-      const ti = el('typingInput');
-      if (ti) { ti.value = ''; ti.disabled = true; }
-      setDisplay('practiceExitRow', 'none');
-      const timerEl = el('timer');
-      if (timerEl && timerEl.parentElement) timerEl.parentElement.style.display = '';
-      setText('accuracy', 100);
-    }
-
-    function abortPracticeForMatch() {
-      if (!practice.active) return;
-      teardownPractice();
-      setDisplay('gameArea', 'none');
-    }
-
-    function exitPractice() {
-      if (!practice.active) return;
-      const backToQueue = practice.origin === 'queue' && isQueueWaiting;
-
-      resetGameState();
-      setHTML('resultBanner', '');
-      setClassName('resultBanner', 'result-banner');
-      setDisplay('restartRow', 'none');
-      setDisplay('gameArea', 'none');
-
-      if (backToQueue) {
-        setLobbyVisible(false);
-        setTitle('Finding opponent...');
-        setStatus('Still searching for an opponent...');
-        setQueueControlsVisible(true);
-      } else {
-        showLobbyMenu();
-        setStatus('');
-      }
-    }
-
-    /* ---------- 12) 타이핑 입력 처리 (Practice + 매치 공용) ---------- */
-
-    function paintTypedChars(value) {
-      const qd = el('quoteDisplay');
-      if (!qd) return;
-      const spans = qd.querySelectorAll('span.char');
-      spans.forEach((span, i) => {
-        if (i < value.length) span.className = 'char ' + (value[i] === sampleText[i] ? 'correct' : 'incorrect');
-        else span.className = 'char';
-      });
-    }
-
-    function computeAccuracy() {
-      return totalTyped > 0
-        ? Math.round(((totalTyped - totalErrors) / totalTyped) * 100)
-        : 100;
-    }
-
-    function updateAccuracyDisplay() {
-      setText('accuracy', computeAccuracy());
-    }
-
-    // ★ 입력 판정 방식 (IME 무관)
-    //   기존: hidden input의 value를 그대로 읽어 원문과 비교했다.
-    //         한글 IME가 켜져 있으면 영문 키가 'ㅅ', 'ㅙ' 같은 한글로 조합되어
-    //         전부 오타로 판정되고(공백만 정답) Accuracy가 20%대로 폭락했다.
-    //   수정: keydown의 "물리 키(e.code)"로 영문 글자를 직접 확정해 자체 버퍼(prevVal)에 쌓고,
-    //         입력창 value는 판정에 사용하지 않는다. (가상 키보드처럼 e.code가 없는 환경만 input 이벤트로 보조 처리)
-    let physicalKeyboardSeen = false;
-
-    function keyEventToChar(e) {
-      const code = e.code || '';
-      const letter = code.match(/^Key([A-Z])$/);
-      if (letter) {
-        const caps = !!(e.getModifierState && e.getModifierState('CapsLock'));
-        const upper = !!e.shiftKey !== caps;
-        return upper ? letter[1] : letter[1].toLowerCase();
-      }
-      if (code === 'Space') return ' ';
-      const digit = code.match(/^Digit([0-9])$/);
-      if (digit && !e.shiftKey) return digit[1];
-      if (e.key && e.key.length === 1 && !e.isComposing && e.keyCode !== 229) return e.key;
-      return null;
-    }
-
-    function canAcceptTyping() {
-      const ti = el('typingInput');
-      if (!ti || ti.disabled || gameEnded) return false;
-      if (!(inGame || practice.active) || typingLocked) return false;
-      return true;
-    }
-
-    function onTypingKeyDown(e) {
-      if (e.code && e.code !== 'Unidentified') physicalKeyboardSeen = true;
-      if (!canAcceptTyping()) return;
-      if (e.ctrlKey || e.metaKey || e.altKey) {
-        if (e.key === 'Backspace') e.preventDefault();
-        return;
-      }
-      if (e.key === 'Backspace') {
-        e.preventDefault();
-        if (prevVal.length > 0) applyTypedValue(prevVal.slice(0, -1));
-        return;
-      }
-      const ch = keyEventToChar(e);
-      if (ch === null) return;
-      e.preventDefault();
-      if (prevVal.length >= sampleText.length) return;
-      applyTypedValue(prevVal + ch);
-    }
-
-    function appendAsciiChars(data) {
-      for (const ch of String(data || '')) {
-        if (!canAcceptTyping()) break;
-        if (!/^[\x20-\x7E]$/.test(ch)) continue;
-        if (prevVal.length >= sampleText.length) break;
-        applyTypedValue(prevVal + ch);
-      }
-    }
-
-    // 보조 경로: 물리 키보드(e.code)가 확인된 환경에서는 사용하지 않는다 (이중 집계 방지).
-    function onTypingFallbackInput(e) {
-      const ti = e.target;
-      if (!ti) return;
-      if (physicalKeyboardSeen || e.isComposing) { if (!e.isComposing) ti.value = ''; return; }
-      if (canAcceptTyping()) {
-        const type = e.inputType || '';
-        if (type === 'deleteContentBackward') {
-          if (prevVal.length > 0) applyTypedValue(prevVal.slice(0, -1));
-        } else if (type === 'insertText' && e.data) {
-          appendAsciiChars(e.data);
-        }
-      }
-      ti.value = '';
-    }
-
-    function onTypingCompositionEnd(e) {
-      const ti = e.target;
-      if (!physicalKeyboardSeen && canAcceptTyping() && /^[\x20-\x7E]+$/.test(e.data || '')) {
-        appendAsciiChars(e.data);
-      }
-      if (ti) ti.value = '';
-    }
-
-    // 원문(sampleText)과 사용자가 입력한 문자열(value)을 비교해 화면/통계/서버 전송을 갱신한다.
-    function applyTypedValue(value) {
-      if (gameEnded) return;
-      const ti = el('typingInput');
-      if (!ti || ti.disabled) return;
-
-      const prev = prevVal;
-
-      // 새로 입력된 글자만 집계 (백스페이스 구간은 집계하지 않음)
-      for (let i = prev.length; i < value.length; i++) {
-        totalTyped++;
-        if (value[i] !== sampleText[i]) totalErrors++;
-      }
-      prevVal = value;
-      ti.value = '';
-
-      paintTypedChars(value);
-      positionCaret(myCaretEl, value.length);
-      updateViewportScroll(Math.max(0, getRowForIndex(value.length) - 1));
-      updateAccuracyDisplay();
-
-      if (!practice.active) {
-        // 서버는 'progress' 이벤트로 진행도를 받는다 (charIndex가 텍스트 길이에 도달하면 서버가 완료 처리).
-        emit('progress', {
-          charIndex: value.length,
-          totalTyped,
-          totalErrors,
-          netCorrect: Math.max(0, totalTyped - totalErrors),
-          accuracy: computeAccuracy()
+        match.playerIds.forEach((id) => {
+          const s = io.sockets.sockets.get(id);
+          if (s) s.emit('rematchError', { message: 'Opponent disconnected.' });
         });
       }
+    }
+  });
 
-      if (value.length >= sampleText.length) {
-        if (practice.active) {
-          showPracticeText(generatePracticeText(sampleText));
-        } else {
-          // 서버에 별도 완료 이벤트는 없다. 마지막 'progress' emit으로 서버가 100% 완료를 판정한다.
-          typingLocked = true;   // 안전장치가 다시 풀지 않도록 의도적 잠금 표시
-          ti.disabled = true;
-          setStatus('✅ Finished! Waiting for time to run out or your opponent to finish...');
-        }
+  socket.on('declineRematch', (data) => {
+    data = data || {};
+    const roomId = data.roomId;
+    const match = recentMatches[roomId];
+    if (!match || !match.playerIds.includes(socket.id)) return;
+    const oppId = match.playerIds.find((id) => id !== socket.id);
+    const oppSocket = oppId ? io.sockets.sockets.get(oppId) : null;
+    if (oppSocket) oppSocket.emit('rematchDeclined');
+    cleanupPendingRematch(roomId);
+    delete recentMatches[roomId];
+  });
+
+  socket.on('disconnect', () => {
+    removeFromWaitingQueues(socket);
+    clearPracticeSession(socket.id);
+
+    const myPid = socket.data.playerId;
+    if (myPid && playerIdToSocket[myPid] === socket.id) delete playerIdToSocket[myPid];
+
+    // 재경기 대기/제안 중이었다면 상대에게 알리고 정리한다.
+    for (const [rid, match] of Object.entries(recentMatches)) {
+      if (match.playerIds.includes(socket.id)) {
+        const oppId = match.playerIds.find((id) => id !== socket.id);
+        const oppSocket = oppId ? io.sockets.sockets.get(oppId) : null;
+        if (oppSocket) oppSocket.emit('rematchDeclined');
+        cleanupPendingRematch(rid);
+        delete recentMatches[rid];
       }
     }
 
-    function initTypingInput() {
-      const area = el('typeArea');
-      if (area) {
-        ['paste', 'drop', 'cut'].forEach((evt) => {
-          area.addEventListener(evt, (e) => { e.preventDefault(); }, true);
-        });
-        area.addEventListener('keydown', (e) => {
-          if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End'].includes(e.key)) e.preventDefault();
-        }, true);
-      }
-      on('typingInput', 'keydown', onTypingKeyDown);
-      on('typingInput', 'input', onTypingFallbackInput);
-      on('typingInput', 'compositionend', onTypingCompositionEnd);
-
-      // ★ 포커스 자동 이동 (1): 문장 영역 클릭
-      on('quoteViewport', 'click', focusTypingInput);
-
-      // ★ 포커스 자동 이동 (2): 게임 화면 아무 곳이나 클릭해도 입력창으로 포커스
-      on('gameArea', 'click', () => {
-        if (inGame || practice.active) focusTypingInput();
-      });
-
-      // ★ 포커스 자동 이동 (3): 포커스가 빠진 상태에서 글자 키를 누르면 즉시 입력창으로 포커스
-      document.addEventListener('keydown', (e) => {
-        if (!(inGame || practice.active) || gameEnded || typingLocked) return;
-        if (e.ctrlKey || e.metaKey || e.altKey) return;
-        if (!e.key || (e.key.length !== 1 && e.key !== 'Process')) return;
-        const ti = el('typingInput');
-        if (!ti || ti.disabled || document.activeElement === ti) return;
-        const modal = el('reportModalOverlay');
-        if (modal && modal.classList.contains('show')) return;
-        const ae = document.activeElement;
-        if (ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA')) return;
-        ti.focus();
-        onTypingKeyDown(e);   // 포커스를 옮기는 이 키 입력도 놓치지 않고 바로 판정한다
-      });
-
-      // 탭 전환 / 창 포커스 복귀 시에도 즉시 상태 점검
-      document.addEventListener('visibilitychange', () => {
-        if (!document.hidden) { ensureTypingEnabled(); if (inGame && !typingLocked) focusTypingInput(); }
-      });
-      window.addEventListener('focus', () => {
-        ensureTypingEnabled();
-        if (inGame && !typingLocked) focusTypingInput();
-      });
+    const cCode = socket.data.customRoomCode;
+    if (cCode && customRooms[cCode]) {
+      customRooms[cCode].players = customRooms[cCode].players.filter((p) => p.id !== socket.id);
+      if (customRooms[cCode].players.length === 0) delete customRooms[cCode];
+      else customRooms[cCode].players[0].emit('roomError', { message: 'Opponent left the room.' });
     }
 
-    /* ---------- 13) 대전 시작 ---------- */
-
-    function getRankTierClass(rank) {
-      const r = Number(rank);
-      if (!Number.isFinite(r) || r < 1 || r > 100) return null;
-      if (r === 1) return 'rank-tier-1';
-      if (r <= 3) return 'rank-tier-3';
-      if (r <= 10) return 'rank-tier-10';
-      return 'rank-tier-100';
-    }
-
-    function renderRankBadge(elId, rank) {
-      const n = el(elId);
-      if (!n) return;
-      const tierClass = getRankTierClass(rank);
-      if (!tierClass) {
-        n.textContent = '';
-        n.className = 'rank-badge hidden-badge';
-        return;
-      }
-      n.textContent = `#${Number(rank)}`;
-      n.className = `rank-badge ${tierClass}`;
-    }
-
-    function renderMatchupBar(data) {
-      const d = data || {};
-      setText('myAvatar', d.myAvatar || '😀');
-      setText('oppAvatar', d.opponentAvatar || '👤');
-      setText('myMatchupName', d.myName || 'Me');
-      setText('oppMatchupName', d.opponentName || 'Opponent');
-      setText('myTierBadge', isRanked ? `MMR ${d.myRating ?? '-'}` : `🏆 ${d.myTrophies || 0}`);
-      setText('oppTierBadge', isRanked ? `MMR ${d.opponentRating ?? '-'}` : `🏆 ${d.opponentTrophies || 0}`);
-      renderRankBadge('myRankBadge', d.myRank);
-      renderRankBadge('oppRankBadge', d.opponentRank);
-      removeCls('matchupBar', 'hidden-state');
-    }
-
-    // ★ gameStart = 매치 "셋업" 신호 (텍스트/시간/상대 정보). 입력창은 아직 잠겨 있다.
-    //   이후 서버가 1초마다 보내는 'countdownTick'(3 → 2 → 1 → START)으로 화면을 갱신하고,
-    //   START 신호가 오면 양쪽 클라이언트가 동시에 입력창을 열고 타이머를 시작한다.
-    sub('gameStart', (data) => {
-      if (!data) return;
-      const early = pendingTick;      // gameStart보다 먼저 도착한 tick이 있으면 아래에서 재생
-      const wasPracticing = practice.active;
-      resetGameState();   // 연습 중이었다면 여기서 함께 종료된다
-
-      currentMode = data.mode;
-      currentDuration = data.duration;
-      sampleText = data.text;
-      duration = data.duration;
-      isRanked = !!data.isRanked;
-
-      matchActive = true;     // ★ 이제부터 countdownTick을 받아 처리한다
-      inGame = false;
-      typingLocked = false;
-
-      const timerEl = el('timer');
-      if (timerEl && timerEl.parentElement) timerEl.parentElement.style.display = '';
-      setText('timer', duration);
-
-      setDisplay('modeSelect', 'none');
-      hideQueueControls();
-      setDisplay('roomWaiting', 'none');
-      setDisplay('gameArea', 'block');
-      removeCls('roomCodeModal', 'show');
-      setLobbyVisible(false);
-
-      setText('modeBadge', `${data.isRanked ? '[Ranked] ' : '[Casual] '}${duration}s`);
-      setTitle('Opponent found!');
-      setStatus(wasPracticing ? 'Opponent found! Practice ended — match starting!' : 'Opponent found!');
-      setHTML('resultBanner', '');
-      setClassName('resultBanner', 'result-banner');
-      setDisplay('restartRow', 'none');
-      setText('accuracy', 100);
-
-      renderMatchupBar(data);
-      renderQuote();
-      startInputWatchdog();
-
-      if (early) handleCountdownTick(early);
-    });
-
-    // ★ 서버 주도 카운트다운 수신
-    sub('countdownTick', handleCountdownTick);
-
-    sub('opponentProgress', (data) => {
-      if (!oppCaretEl) return;
-      const idx = (data && Number.isFinite(data.charIndex)) ? data.charIndex : 0;
-      positionCaret(oppCaretEl, idx);
-    });
-
-    /* ---------- 14) 재경기 ---------- */
-    function clearRematchState() {
-      clearInterval(rematchCountdownInterval);
-      rematchCountdownInterval = null;
-      rematchDeadline = null;
-      rematchRoomId = null;
-      rematchRequestedByMe = false;
-
-      setDisplay('rematchStatus', 'none');
-      setHTML('rematchActionRow', '');
-      const btn = el('rematchBtn');
-      if (btn) { btn.disabled = false; btn.innerText = '🔁 Rematch'; btn.style.display = ''; }
-    }
-
-    function startRematchCountdownUI() {
-      rematchDeadline = Date.now() + 10000;
-      setDisplay('rematchStatus', 'block');
-      clearInterval(rematchCountdownInterval);
-      rematchCountdownInterval = setInterval(() => {
-        const remaining = Math.max(0, Math.ceil((rematchDeadline - Date.now()) / 1000));
-        const base = rematchRequestedByMe ? 'Waiting for opponent to accept' : 'Opponent wants a rematch';
-        setText('rematchStatusText', `${base}... (${remaining}s)`);
-        if (remaining <= 0) clearInterval(rematchCountdownInterval);
-      }, 250);
-    }
-
-    function requestRematch() {
-      if (!lastRoomId) return;
-      rematchRoomId = lastRoomId;
-      rematchRequestedByMe = true;
-      emit('requestRematch', { roomId: lastRoomId });
-      const btn = el('rematchBtn');
-      if (btn) btn.style.display = 'none';
-      setHTML('rematchActionRow',
-        `<button class="btn-restart btn-secondary" onclick="cancelRematchRequest()">✕ Cancel</button>`);
-      startRematchCountdownUI();
-    }
-
-    function cancelRematchRequest() {
-      if (rematchRoomId) emit('declineRematch', { roomId: rematchRoomId });
-      clearRematchState();
-      setPostMatchButtons();
-    }
-
-    function acceptRematch() {
-      if (!rematchRoomId) return;
-      emit('requestRematch', { roomId: rematchRoomId });
-      setHTML('rematchActionRow', '');
-      setText('rematchStatusText', 'Accepting...');
-    }
-
-    function declineRematchPrompt() {
-      if (rematchRoomId) emit('declineRematch', { roomId: rematchRoomId });
-      clearRematchState();
-      setPostMatchButtons();
-    }
-
-    sub('rematchRequested', (data) => {
-      if (!data || !lastRoomId || data.roomId !== lastRoomId) return;
-      rematchRoomId = data.roomId;
-      rematchRequestedByMe = false;
-      const btn = el('rematchBtn');
-      if (btn) btn.style.display = 'none';
-      setHTML('rematchActionRow',
-        `<button class="btn-restart" onclick="acceptRematch()">✅ Accept</button>
-         <button class="btn-restart btn-secondary" onclick="declineRematchPrompt()">✕ Decline</button>`);
-      startRematchCountdownUI();
-    });
-
-    sub('rematchTimeout', () => {
-      setStatus('⌛ Rematch request timed out.');
-      clearRematchState();
-      setPostMatchButtons();
-    });
-
-    sub('rematchDeclined', () => {
-      setStatus('🚫 Opponent declined the rematch.');
-      clearRematchState();
-      setPostMatchButtons();
-    });
-
-    sub('rematchError', (data) => {
-      setStatus('⚠️ ' + ((data && data.message) || 'Rematch unavailable.'));
-      clearRematchState();
-      setPostMatchButtons();
-    });
-
-    /* ---------- 15) 신고 ---------- */
-    function openReportModal() {
-      selectedReportReason = null;
-      document.querySelectorAll('.report-option').forEach((o) => o.classList.remove('selected'));
-      document.querySelectorAll('input[name="reportReason"]').forEach((r) => { r.checked = false; });
-      const submitBtn = document.querySelector('.report-modal-box .btn-save');
-      if (submitBtn) { submitBtn.disabled = false; submitBtn.innerText = 'Submit Report'; }
-      addCls('reportModalOverlay', 'show');
-    }
-
-    function closeReportModal() { removeCls('reportModalOverlay', 'show'); }
-
-    function selectReportReason(reason, elm) {
-      selectedReportReason = reason;
-      document.querySelectorAll('.report-option').forEach((o) => o.classList.remove('selected'));
-      if (elm && elm.closest('.report-option')) elm.closest('.report-option').classList.add('selected');
-    }
-
-    function submitReport() {
-      if (!selectedReportReason) { setStatus('⚠️ Please select a reason.'); return; }
-      if (!lastOpponentId || !lastRoomId) { setStatus('⚠️ No opponent data available.'); closeReportModal(); return; }
-      if (reportedMatchIds.has(lastRoomId)) { setStatus('⚠️ You already reported in this match.'); closeReportModal(); return; }
-      const submitBtn = document.querySelector('.report-modal-box .btn-save');
-      if (submitBtn) { submitBtn.disabled = true; submitBtn.innerText = 'Submitting...'; }
-      emit('report_player', {
-        targetPlayerId: lastOpponentId,
-        roomId: lastRoomId,
-        reason: selectedReportReason,
-        matchStats: lastMatchStats || {}
-      });
-      reportedMatchIds.add(lastRoomId);
-    }
-
-    sub('reportResult', (data) => {
-      closeReportModal();
-      const submitBtn = document.querySelector('.report-modal-box .btn-save');
-      if (submitBtn) { submitBtn.disabled = false; submitBtn.innerText = 'Submit Report'; }
-      if (data && data.success) {
-        setStatus('✅ Report submitted. Thank you!');
-        const reportBtn = el('reportBtn');
-        if (reportBtn) { reportBtn.disabled = true; reportBtn.innerText = 'Reported'; }
+    const roomId = socket.data.roomId;
+    const room = rooms[roomId];
+    if (room && !room.ended) {
+      const remainingId = Object.keys(room.players).find((id) => id !== socket.id);
+      if (remainingId) {
+        // 남은 플레이어에게 몰수승(forfeit win) 처리.
+        // endGame을 그대로 재사용해서 랭크전 MMR, 트로피, 일반전 승수까지
+        // 정상 경기 종료와 완전히 동일한 경로로 정산한다. (카운트다운 타이머도 endGame에서 정리됨)
+        endGame(roomId, remainingId, { reason: 'forfeit' });
       } else {
-        setStatus('⚠️ ' + ((data && data.message) || 'Report failed.'));
+        clearTimeout(room.endTimeoutId);
+        stopCountdown(room);
+        delete rooms[roomId];
       }
-    });
-
-    on('reportModalOverlay', 'click', (e) => {
-      if (e.target && e.target.id === 'reportModalOverlay') closeReportModal();
-    });
-
-    /* ---------- 16) 게임 종료 ---------- */
-    function renderCompareCard(label, colClass, stats) {
-      const s = stats || { netCorrect: 0, accuracy: 0 };
-      return `<div class="dash-col ${colClass}">`
-        + `<h4>${label}</h4>`
-        + `<div class="dash-stat-row"><span class="k">Net Chars</span><span class="v">${s.netCorrect}</span></div>`
-        + `<div class="dash-stat-row"><span class="k">Accuracy</span><span class="v">${s.accuracy}%</span></div>`
-        + `</div>`;
     }
 
-    sub('gameOver', (data) => {
-      if (!data) return;
-      gameEnded = true;
-      matchActive = false;
-      inGame = false;
-      typingLocked = true;
-      clearAllCountdowns();
-      clearInterval(gameTimerInterval);
-      clearRematchState();
+    // ★ 소켓 기준으로 남아있던 임시 랭킹 데이터(userRatings 등)는 계정(playerId)에
+    //   이미 persist* 함수들을 통해 저장되어 있으므로, 소켓 자체 항목은 정리한다.
+    //   (정리하지 않으면 접속 종료된 유령 소켓 항목이 buildTopRankList의
+    //    "현재 접속 중" 루프에는 더 이상 잡히지 않지만, 메모리에 무한히
+    //    쌓이는 것을 막기 위해 명시적으로 삭제한다.)
+    delete userRatings[socket.id];
+    delete userNames[socket.id];
+    delete userAvatars[socket.id];
+    delete userNormalWins[socket.id];
+    delete userTrophies[socket.id];
+  });
+});
 
-      const tiEnd = el('typingInput');
-      if (tiEnd) tiEnd.disabled = true;
-
-      if (data.opponentId) lastOpponentId = data.opponentId;
-      if (data.roomId) lastRoomId = data.roomId;
-      if (data.myStats) lastMatchStats = data.myStats;
-
-      updateTopBar();
-      applyUnlockStatus(data.unlock, { justUnlocked: !!data.justUnlocked, unlockedNow: !!data.unlockedNow });
-
-      const myStats = data.myStats || {};
-      const tagClass = data.result === 'win' ? 'win' : (data.result === 'lose' ? 'lose' : 'draw');
-      let tagText = data.result === 'win' ? '🏆 WIN' : (data.result === 'lose' ? '💀 LOSE' : '🤝 DRAW');
-      if (data.reason === 'forfeit') {
-        tagText = data.result === 'lose' ? '💀 LOSE (Forfeited)' : '🏆 WIN (Opponent Forfeited)';
-      } else if (data.reason === 'cheat_detected') {
-        tagText = data.disqualified ? '🚫 DISQUALIFIED (Cheat Detected)' : '🏆 WIN (Opponent Disqualified)';
-      }
-
-      const changeHtml = data.ratingData
-        ? `<div class="rating-change">${data.ratingData.diff >= 0 ? '+' : ''}${data.ratingData.diff} MMR (${data.ratingData.old} → ${data.ratingData.new})</div>`
-        : (data.trophyData
-            ? `<div class="rating-change">${data.trophyData.diff >= 0 ? '+' : ''}${data.trophyData.diff} 🏆 Trophies</div>`
-            : '');
-
-      const alreadyReported = reportedMatchIds.has(lastRoomId || '');
-      const oppName = data.opponentName || 'Opponent';
-      const reportBtnHtml = `<button class="btn-report" id="reportBtn" onclick="openReportModal()" ${alreadyReported ? 'disabled' : ''}>${alreadyReported ? 'Reported' : '⚠ Report'}</button>`;
-      const invalidatedNote = data.invalidated
-        ? `<div class="rating-change" style="color:#888;">⚖️ Practice match — rewards not counted (same account detected)</div>`
-        : '';
-
-      setHTML('resultBanner', `
-        <div class="dash-result-tag ${tagClass}">${tagText}</div>
-        ${invalidatedNote}
-        <div class="opp-name-row">
-          <span class="opp-label">vs</span>
-          <span class="opp-name">${oppName}</span>
-          ${reportBtnHtml}
-        </div>
-        ${changeHtml}
-        <div class="dash-main">
-          <div class="dash-primary">
-            <div class="dash-value">${myStats.netCorrect || 0}</div>
-            <div class="dash-label">Final Score (Net Chars)</div>
-          </div>
-        </div>
-        <div class="dash-compare">
-          ${renderCompareCard('You', 'me', data.myStats)}
-          ${renderCompareCard('Opponent', 'opp', data.opponentStats)}
-        </div>
-      `);
-      setClassName('resultBanner', 'result-banner dashboard show');
-
-      setLobbyVisible(true);
-      setPostMatchButtons();
-    });
-
-    sub('opponentLeft', () => {
-      gameEnded = true;
-      matchActive = false;
-      inGame = false;
-      typingLocked = true;
-      clearAllCountdowns();
-      clearInterval(gameTimerInterval);
-      clearRematchState();
-      const ti = el('typingInput');
-      if (ti) ti.disabled = true;
-      hideQueueControls();
-      setDisplay('leaveMatchRow', 'none');
-      setHTML('resultBanner', `<div class="dash-result-tag win">🏆 WIN (Opponent left)</div>`);
-      setClassName('resultBanner', 'result-banner dashboard show');
-      setLobbyVisible(true);
-      setPostMatchButtons();
-    });
-
-    /* ---------- 17) inline onclick용 전역 노출 (스코프 이슈 방지) ---------- */
-    window.switchView = switchView;
-    window.switchMatchKind = switchMatchKind;
-    window.selectMode = selectMode;
-    window.startPracticeMode = startPracticeMode;
-    window.findNextMatch = findNextMatch;
-    window.cancelSearch = cancelSearch;
-    window.leaveCurrentMatch = leaveCurrentMatch;
-    window.startPrivateRoom = startPrivateRoom;
-    window.joinPrivateRoom = joinPrivateRoom;
-    window.cancelPrivateRoom = cancelPrivateRoom;
-    window.copyInviteLink = copyInviteLink;
-    window.copyInviteLinkToClipboard = copyInviteLinkToClipboard;
-    window.closeRoomModal = closeRoomModal;
-    window.enterSoloPractice = enterSoloPractice;
-    window.exitPractice = exitPractice;
-    window.requestRematch = requestRematch;
-    window.cancelRematchRequest = cancelRematchRequest;
-    window.acceptRematch = acceptRematch;
-    window.declineRematchPrompt = declineRematchPrompt;
-    window.openReportModal = openReportModal;
-    window.closeReportModal = closeReportModal;
-    window.selectReportReason = selectReportReason;
-    window.submitReport = submitReport;
-
-    /* ---------- 18) 초기화 ---------- */
-    updateTopBar();
-    hideQueueControls();
-    initTypingInput();
-    startInputWatchdog();
-  </script>
-</body>
-</html>
+server.listen(PORT, () => console.log(`서버 실행 중: http://localhost:${PORT} [build: casual-no-trophy-v3]`));

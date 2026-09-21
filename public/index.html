@@ -1800,11 +1800,15 @@
         tagText = data.disqualified ? '🚫 DISQUALIFIED (Cheat Detected)' : '🏆 WIN (Opponent Disqualified)';
       }
 
-      const changeHtml = data.ratingData
-        ? `<div class="rating-change">${data.ratingData.diff >= 0 ? '+' : ''}${data.ratingData.diff} MMR (${data.ratingData.old} → ${data.ratingData.new})</div>`
-        : (data.trophyData
-            ? `<div class="rating-change">${data.trophyData.diff >= 0 ? '+' : ''}${data.trophyData.diff} 🏆 Trophies</div>`
-            : '');
+      // ★ Casual(친선/커스텀 룸)은 서버 값과 무관하게 항상 "변동 없음"으로 표시한다.
+      const rankedMatch = (typeof data.isRanked === 'boolean') ? data.isRanked : isRanked;
+      const changeHtml = !rankedMatch
+        ? `<div class="rating-change" style="color:#888;">No Rank Change (+0 🏆 Trophies)</div>`
+        : (data.ratingData
+            ? `<div class="rating-change">${data.ratingData.diff >= 0 ? '+' : ''}${data.ratingData.diff} MMR (${data.ratingData.old} → ${data.ratingData.new})</div>`
+            : (data.trophyData
+                ? `<div class="rating-change">${data.trophyData.diff >= 0 ? '+' : ''}${data.trophyData.diff} 🏆 Trophies</div>`
+                : ''));
 
       const alreadyReported = reportedMatchIds.has(lastRoomId || '');
       const oppName = data.opponentName || 'Opponent';
