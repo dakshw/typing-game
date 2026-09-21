@@ -524,6 +524,14 @@
     let gameTimerInterval = null;
     let gameEnded = false;
 
+    // ★ 입력 활성화 안전장치용 상태
+    let matchActive = false;   // gameStart 수신 후 ~ gameOver/opponentLeft 전까지 true
+    let inGame = false;        // 카운트다운이 끝나 실제로 타이핑이 가능한 상태
+    let typingLocked = false;  // 문장 완료 / 시간 종료로 의도적으로 입력을 잠근 상태
+    let localEndAt = null;     // 로컬 performance.now() 기준 종료 시각 (시계 오차 영향 없음)
+    let inputWatchdog = null;
+    let urlRoomHandled = false; // ?room= 파라미터 자동 입장은 한 번만
+
     // 서버-클라이언트 시계 차이 보정값 (serverNow - clientNow)
     let serverClockOffset = 0;
 
@@ -755,6 +763,9 @@
 
     sub('sessionReplaced', () => {
       gameEnded = true;
+      matchActive = false;
+      inGame = false;
+      typingLocked = true;
       teardownPractice();
       const ti = el('typingInput');
       if (ti) ti.disabled = true;
@@ -829,6 +840,12 @@
       clearRematchState();
       teardownPractice();
       gameEnded = false;
+
+      // 안전장치 상태 초기화
+      matchActive = false;
+      inGame = false;
+      typingLocked = false;
+      localEndAt = null;
 
       lastKeystrokeTime = null;
       pendingDeltas = [];
@@ -917,7 +934,7 @@
 
     // 매치 확정 계열 이벤트 — 연습 중이면 연습을 즉시 종료하고 대기열 영역을 숨긴다.
     // ★ 카운트다운 숫자는 여기서 표시하지 않는다. 서버가 준 절대 시작 시각(startTime)을
-    //   기준으로 gameStart 핸들러의 runCountdown()이 단독으로 3, 2, 1을 그린다.
+    //   기준으로 gameStart 핸들러의 startCountdown()이 단독으로 3, 2, 1을 그린다.
     sub('matchFound', () => {
       abortPracticeForMatch();
       hideQueueControls();
@@ -1003,10 +1020,15 @@
       }
     }
 
+    // ★ ?room=CODE 자동 입장은 최초 1회만 실행한다.
+    //   소켓이 재연결(connect 재발생)될 때마다 joinRoom을 다시 보내
+    //   진행 중인 매치 화면을 덮어쓰는 것을 방지한다.
     function checkUrlRoomParam() {
+      if (urlRoomHandled || matchActive || inGame) return;
       const params = new URLSearchParams(window.location.search);
       const roomCode = params.get('room');
       if (!roomCode) return;
+      urlRoomHandled = true;
       const input = el('inviteCodeInput');
       if (input) input.value = roomCode.toUpperCase();
       joinPrivateRoom();
@@ -1054,7 +1076,7 @@
       setDisplay('modeSelect', 'none');
       setDisplay('typeTab', 'none');
 
-      if (matchCountdownArmed) return;
+      if (matchCountdownArmed || inGame) return;
 
       syncServerClock(data && data.serverNow);
       const target = (data && Number.isFinite(data.startTime))
@@ -1129,13 +1151,75 @@
       if (qd) qd.style.transform = `translateY(-${Math.max(0, row) * LINE_HEIGHT}px)`;
     }
 
-    // 입력창 활성화 (카운트다운 종료 시점 단일 진입점)
-    function enableTypingNow() {
+    /* =========================================================
+       11-A) 입력창 활성화 — 단일 진입점 + 안전장치(Watchdog)
+       ========================================================= */
+
+    // 포커스만 시도 (disabled면 아무 것도 하지 않음)
+    function focusTypingInput() {
       const ti = el('typingInput');
-      if (ti) { ti.disabled = false; ti.readOnly = false; ti.focus(); }
+      if (!ti || ti.disabled) return;
+      try { ti.focus({ preventScroll: true }); } catch (e) { try { ti.focus(); } catch (e2) {} }
+    }
+
+    // disabled/readonly를 속성 레벨까지 확실히 제거하고 포커스를 준다.
+    function forceEnableTyping() {
+      const ti = el('typingInput');
+      if (!ti) return;
+      ti.disabled = false;
+      ti.readOnly = false;
+      ti.removeAttribute('disabled');
+      ti.removeAttribute('readonly');
+      focusTypingInput();
+    }
+
+    // ★ 카운트다운 종료 시점 단일 진입점 (여러 번 호출돼도 안전)
+    function enableTypingNow() {
+      if (gameEnded || practice.active) return;
+
+      if (inGame) {
+        // 이미 시작된 상태 — 혹시 잠겨 있으면 다시 풀어준다.
+        if (!typingLocked) forceEnableTyping();
+        return;
+      }
+
+      inGame = true;
+      typingLocked = false;
+
+      clearInterval(countdownInterval);
+      countdownInterval = null;
+      setTitle('Start!');
+
+      forceEnableTyping();
+      // 렌더링/레이아웃 직후 포커스가 빠지는 경우를 대비한 재시도
+      requestAnimationFrame(focusTypingInput);
+      setTimeout(focusTypingInput, 60);
+      setTimeout(focusTypingInput, 250);
+
       addCls('matchupBar', 'hidden-state');
       setDisplay('leaveMatchRow', 'block');
       startGameTimer();
+    }
+
+    // ★ 안전장치: 카운트다운 콜백을 놓치거나 인터벌이 지연(백그라운드 탭 스로틀 등)돼도,
+    //   서버 시작 시각이 지났고 매치가 활성 상태면 무조건 입력창을 풀어준다.
+    function ensureTypingEnabled() {
+      if (!matchActive || gameEnded || practice.active) return;
+      if (!Number.isFinite(serverStartTime)) return;
+
+      if (!inGame) {
+        if (syncedNow() >= serverStartTime) enableTypingNow();
+        return;
+      }
+
+      if (typingLocked) return;
+      const ti = el('typingInput');
+      if (ti && (ti.disabled || ti.readOnly)) forceEnableTyping();
+    }
+
+    function startInputWatchdog() {
+      clearInterval(inputWatchdog);
+      inputWatchdog = setInterval(ensureTypingEnabled, 120);
     }
 
     // ★ 서버가 준 절대 시작 시각(serverStartTime)과 서버 시계 보정된 "지금"의 차이로
@@ -1146,9 +1230,12 @@
       clearAllCountdowns();
       matchCountdownArmed = true;
 
-      // startTime이 비정상이면 카운트다운이 영원히 끝나지 않으므로 3초 뒤로 대체
-      if (!Number.isFinite(serverStartTime)) {
-        console.warn('[countdown] invalid serverStartTime:', serverStartTime);
+      // startTime이 비정상(NaN)이거나 현재 대비 지나치게 어긋나 있으면(클라이언트 시계 오차 등)
+      // 카운트다운이 영원히 끝나지 않거나 즉시 끝나버리므로 3초 뒤로 대체
+      if (!Number.isFinite(serverStartTime)
+          || serverStartTime - syncedNow() > 10000
+          || serverStartTime - syncedNow() < -5000) {
+        console.warn('[countdown] abnormal serverStartTime:', serverStartTime, 'now:', syncedNow());
         serverStartTime = syncedNow() + 3000;
       }
 
@@ -1158,7 +1245,6 @@
         if (remainingMs <= 0) {
           clearInterval(countdownInterval);
           countdownInterval = null;
-          setTitle('Start!');
           enableTypingNow();
           return;
         }
@@ -1170,24 +1256,31 @@
       };
 
       tick();
-      if (countdownInterval === null && matchCountdownArmed && !el('typingInput').disabled) return; // 이미 즉시 시작된 경우
-      countdownInterval = setInterval(tick, 50);
+      if (!inGame) countdownInterval = setInterval(tick, 50);
     }
 
+    // ★ 게임 타이머는 "입력이 열린 시점"부터의 로컬 경과 시간으로 계산한다.
+    //   클라이언트 시계가 서버와 크게 어긋나 있어도(외부 유저) 시작하자마자 타이머가 0이 되어
+    //   입력창이 잠기는 일이 없다. 실제 종료 판정은 서버가 한다.
     function startGameTimer() {
       clearInterval(gameTimerInterval);
-      gameTimerInterval = setInterval(() => {
-        const elapsed = (syncedNow() - serverStartTime) / 1000;
-        const remaining = Math.max(0, Math.round(duration - elapsed));
+      const lateMs = Math.min(1500, Math.max(0, syncedNow() - serverStartTime));
+      localEndAt = performance.now() + (Number(duration) || 0) * 1000 - lateMs;
+
+      const update = () => {
+        const remaining = Math.max(0, Math.ceil((localEndAt - performance.now()) / 1000));
         setText('timer', remaining);
         if (remaining <= 0) {
           clearInterval(gameTimerInterval);
+          typingLocked = true;
           const ti = el('typingInput');
           if (ti) ti.disabled = true;
           // 타임아웃 시 서버로 별도 emit이 필요 없다: 서버가 자체 setTimeout으로 endGame()을 호출하며,
           // 그때 쓰이는 netCorrect는 대전 내내 보낸 'progress' emit들로 이미 서버에 누적되어 있다.
         }
-      }, 200);
+      };
+      update();
+      gameTimerInterval = setInterval(update, 200);
     }
 
     /* =========================================================
@@ -1230,8 +1323,7 @@
       setDisplay('practiceExitRow', 'block');
 
       showPracticeText(text);
-      const ti = el('typingInput');
-      if (ti) { ti.disabled = false; ti.readOnly = false; ti.focus(); }
+      forceEnableTyping();
     }
 
     function beginPractice(origin) {
@@ -1350,6 +1442,7 @@
           showPracticeText(generatePracticeText(sampleText));
         } else {
           // 서버에 별도 완료 이벤트는 없다. 마지막 'progress' emit으로 서버가 100% 완료를 판정한다.
+          typingLocked = true;   // 안전장치가 다시 풀지 않도록 의도적 잠금 표시
           ti.disabled = true;
           setStatus('✅ Finished! Waiting for time to run out or your opponent to finish...');
         }
@@ -1367,9 +1460,36 @@
         }, true);
       }
       on('typingInput', 'input', onTypingInput);
-      on('quoteViewport', 'click', () => {
+
+      // ★ 포커스 자동 이동 (1): 문장 영역 클릭
+      on('quoteViewport', 'click', focusTypingInput);
+
+      // ★ 포커스 자동 이동 (2): 게임 화면 아무 곳이나 클릭해도 입력창으로 포커스
+      on('gameArea', 'click', () => {
+        if (inGame || practice.active) focusTypingInput();
+      });
+
+      // ★ 포커스 자동 이동 (3): 포커스가 빠진 상태에서 글자 키를 누르면 즉시 입력창으로 포커스
+      document.addEventListener('keydown', (e) => {
+        if (!(inGame || practice.active) || gameEnded || typingLocked) return;
+        if (e.ctrlKey || e.metaKey || e.altKey) return;
+        if (!e.key || e.key.length !== 1) return;
         const ti = el('typingInput');
-        if (ti && !ti.disabled) ti.focus();
+        if (!ti || ti.disabled || document.activeElement === ti) return;
+        const modal = el('reportModalOverlay');
+        if (modal && modal.classList.contains('show')) return;
+        const ae = document.activeElement;
+        if (ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA')) return;
+        ti.focus();
+      });
+
+      // 탭 전환 / 창 포커스 복귀 시에도 즉시 상태 점검
+      document.addEventListener('visibilitychange', () => {
+        if (!document.hidden) { ensureTypingEnabled(); if (inGame && !typingLocked) focusTypingInput(); }
+      });
+      window.addEventListener('focus', () => {
+        ensureTypingEnabled();
+        if (inGame && !typingLocked) focusTypingInput();
       });
     }
 
@@ -1412,6 +1532,7 @@
 
     // ★ gameStart = 매치 카운트다운의 유일한 시작점.
     //   서버가 보낸 startTime(절대 시각)과 serverNow(시계 보정용)를 받아 startCountdown()이 처리한다.
+    //   matchActive를 켜 두면, 카운트다운 콜백을 놓쳐도 Watchdog이 입력창을 풀어준다.
     sub('gameStart', (data) => {
       if (!data) return;
       const wasPracticing = practice.active;
@@ -1425,8 +1546,13 @@
       serverStartTime = data.startTime;
       isRanked = !!data.isRanked;
 
+      matchActive = true;     // ★ 안전장치 활성화
+      inGame = false;
+      typingLocked = false;
+
       const timerEl = el('timer');
       if (timerEl && timerEl.parentElement) timerEl.parentElement.style.display = '';
+      setText('timer', duration);
 
       setDisplay('modeSelect', 'none');
       hideQueueControls();
@@ -1445,6 +1571,7 @@
       renderMatchupBar(data);
       renderQuote();
       startCountdown();
+      startInputWatchdog();
     });
 
     sub('opponentProgress', (data) => {
@@ -1603,9 +1730,15 @@
     sub('gameOver', (data) => {
       if (!data) return;
       gameEnded = true;
+      matchActive = false;
+      inGame = false;
+      typingLocked = true;
       clearAllCountdowns();
       clearInterval(gameTimerInterval);
       clearRematchState();
+
+      const tiEnd = el('typingInput');
+      if (tiEnd) tiEnd.disabled = true;
 
       if (data.opponentId) lastOpponentId = data.opponentId;
       if (data.roomId) lastRoomId = data.roomId;
@@ -1664,6 +1797,9 @@
 
     sub('opponentLeft', () => {
       gameEnded = true;
+      matchActive = false;
+      inGame = false;
+      typingLocked = true;
       clearAllCountdowns();
       clearInterval(gameTimerInterval);
       clearRematchState();
@@ -1706,6 +1842,7 @@
     updateTopBar();
     hideQueueControls();
     initTypingInput();
+    startInputWatchdog();
   </script>
 </body>
 </html>
