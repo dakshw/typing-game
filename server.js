@@ -84,7 +84,11 @@ const timeModeWordPool = [
 
 const ALLOWED_TIME_DURATIONS = [30, 60, 120];
 const DEFAULT_TIME_DURATION = 60;
-const COUNTDOWN_MS = 3000;
+
+// ★ 서버 주도 카운트다운: 3 -> 2 -> 1 -> START 를 서버가 1초 간격으로 직접 방송한다.
+//   클라이언트 시계(Date.now)는 전혀 사용하지 않는다.
+const COUNTDOWN_SECONDS = 3;
+const COUNTDOWN_TICK_MS = 1000;
 
 const RANKED_UNLOCK_WINS = 3;
 // --- Anti-Cheat: 타이핑 검증 ---
@@ -477,6 +481,7 @@ function sanitizeStat(data, sampleTextLength) {
   const totalErrors = Number.isFinite(data.totalErrors) ? Math.max(0, Math.floor(data.totalErrors)) : 0;
   return { accuracy, charIndex, netCorrect, totalTyped, totalErrors };
 }
+
 // 클라이언트가 보낸 keystroke 간격(ms) 배치를 플레이어 상태에 반영한다.
 // 개수/값 범위를 서버에서 재검증해 비정상적으로 큰 배열이나 음수·과대값 주입을 막는다.
 function recordAntiCheatDeltas(player, rawDeltas) {
@@ -512,8 +517,9 @@ function detectMacroPattern(player) {
   return null;
 }
 
-// 지속 최고 속도(WPM) 제한 감지 — 매치 시작 시각(room.startTime) 기준 누적 타수로 계산.
+// 지속 최고 속도(WPM) 제한 감지 — START 신호를 보낸 시각(room.startTime) 기준 누적 타수로 계산.
 function detectSpeedLimit(player, room) {
+  if (!room.started || !Number.isFinite(room.startTime)) return null;
   if (player.totalTyped < ANTICHEAT_MAX_WPM_MIN_CHARS) return null;
   const elapsedMs = Date.now() - room.startTime;
   if (elapsedMs <= 0) return null;
@@ -532,6 +538,58 @@ function disqualifyPlayer(roomId, cheaterId, reasonCode) {
   endGame(roomId, winnerId, { reason: 'cheat_detected', cheatReason: reasonCode, cheaterId });
 }
 
+// ============================================================
+// ★ 서버 주도 카운트다운
+//   - 방 안의 "두 플레이어 소켓"에게만 직접 emit 한다.
+//     (io.to(roomId)를 쓰면 커스텀룸 코드가 재사용될 때 이전 경기 소켓이 섞일 수 있음)
+//   - 1초 간격으로 { value: 3 } -> { value: 2 } -> { value: 1 } -> { value: 'START' }
+//   - START를 보내는 그 시점에 room.started = true, room.startTime 기록, 종료 타이머 시작.
+// ============================================================
+function emitToRoomPlayers(room, event, payload) {
+  Object.keys(room.players).forEach((id) => {
+    io.to(id).emit(event, payload);
+  });
+}
+
+function stopCountdown(room) {
+  if (room && room.countdownTimerId) {
+    clearInterval(room.countdownTimerId);
+    room.countdownTimerId = null;
+  }
+}
+
+function runServerCountdown(roomId) {
+  const room = rooms[roomId];
+  if (!room || room.ended) return;
+
+  let remaining = COUNTDOWN_SECONDS;
+  emitToRoomPlayers(room, 'countdownTick', { value: remaining });
+
+  room.countdownTimerId = setInterval(() => {
+    const r = rooms[roomId];
+    if (!r || r.ended) {
+      if (r) stopCountdown(r);
+      return;
+    }
+
+    remaining -= 1;
+
+    if (remaining > 0) {
+      emitToRoomPlayers(r, 'countdownTick', { value: remaining });
+      return;
+    }
+
+    // ★ START — 양쪽 클라이언트가 동시에 입력창을 열고 타이머를 시작한다.
+    stopCountdown(r);
+    r.started = true;
+    r.startTime = Date.now(); // 서버 내부 기록용 (Anti-Cheat WPM 계산에만 사용)
+    emitToRoomPlayers(r, 'countdownTick', { value: 'START' });
+
+    // 종료 타이머는 START 시점부터 duration 만큼
+    r.endTimeoutId = setTimeout(() => endGame(roomId, undefined), r.duration * 1000);
+  }, COUNTDOWN_TICK_MS);
+}
+
 function startMatch(playerA, playerB, mode, duration, isRanked, customRoomId) {
   const roomId = customRoomId || `room_${playerA.id}_${playerB.id}_${Date.now()}`;
   const prevTextA = playerA.data.lastText || '';
@@ -539,8 +597,6 @@ function startMatch(playerA, playerB, mode, duration, isRanked, customRoomId) {
 
   playerA.data.lastText = text;
   playerB.data.lastText = text;
-
-  const startTime = Date.now() + COUNTDOWN_MS;
 
   playerA.join(roomId);
   playerB.join(roomId);
@@ -551,8 +607,11 @@ function startMatch(playerA, playerB, mode, duration, isRanked, customRoomId) {
   if (invalidated) console.log(`[Anti-Abuse] Same-account match created: ${roomId}`);
 
   rooms[roomId] = {
-    mode, text, startTime, duration, isRanked,
+    mode, text, duration, isRanked,
     invalidated,
+    started: false,          // ★ START 신호 전송 후 true
+    startTime: null,         // ★ START 신호 전송 시각 (서버 내부용)
+    countdownTimerId: null,
     endTimeoutId: null, ended: false, players: {}
   };
   rooms[roomId].players[playerA.id] = createEmptyPlayerState();
@@ -572,8 +631,10 @@ function startMatch(playerA, playerB, mode, duration, isRanked, customRoomId) {
   const rankA = getPlayerRankInfo(playerA.id, isRanked ? 'rating' : 'trophy');
   const rankB = getPlayerRankInfo(playerB.id, isRanked ? 'rating' : 'trophy');
 
+  // ★ gameStart는 "셋업" 신호다. startTime은 더 이상 보내지 않는다.
+  //   실제 시작 시점은 이후 countdownTick의 'START'가 결정한다.
   const basePayload = {
-    mode, text, startTime,
+    mode, text,
     duration: mode === 'time' ? duration : null,
     isRanked
   };
@@ -589,8 +650,8 @@ function startMatch(playerA, playerB, mode, duration, isRanked, customRoomId) {
     opponentName: nameA, opponentRating: ratingA, opponentTier: tierA, opponentAvatar: avatarA, opponentTrophies: trophiesA, opponentRank: rankA
   });
 
-  const timeoutMs = COUNTDOWN_MS + duration * 1000;
-  rooms[roomId].endTimeoutId = setTimeout(() => endGame(roomId, undefined), timeoutMs);
+  // ★ 서버가 1초 간격으로 3 -> 2 -> 1 -> START 방송
+  runServerCountdown(roomId);
 }
 
 function endGame(roomId, forcedWinnerId, options = {}) {
@@ -598,7 +659,8 @@ function endGame(roomId, forcedWinnerId, options = {}) {
   if (!room || room.ended) return;
   room.ended = true;
   clearTimeout(room.endTimeoutId);
-    const reason = options.reason || null; // 'forfeit', 'cheat_detected' 등 — 클라이언트에 전달
+  stopCountdown(room); // ★ 카운트다운 도중 종료(이탈 등)되면 틱 방송을 멈춘다
+  const reason = options.reason || null; // 'forfeit', 'cheat_detected' 등 — 클라이언트에 전달
   const cheatReason = options.cheatReason || null;
   const cheaterId = options.cheaterId || null;
 
@@ -680,7 +742,7 @@ function endGame(roomId, forcedWinnerId, options = {}) {
     const oppSocket = io.sockets.sockets.get(oppId);
     const oppPlayerId = oppSocket && oppSocket.data ? oppSocket.data.playerId : null;
 
-        io.to(id).emit('gameOver', {
+    io.to(id).emit('gameOver', {
       result: winnerId === null ? 'draw' : (winnerId === id ? 'win' : 'lose'),
       myStats: room.players[id],
       opponentStats: room.players[oppId],
@@ -691,11 +753,11 @@ function endGame(roomId, forcedWinnerId, options = {}) {
       invalidated: !!room.invalidated,
       opponentId: oppPlayerId,
       opponentName: userNames[oppId] || 'Opponent',
-           reason: reason,
+      reason: reason,
       cheatReason: cheatReason,
       disqualified: cheaterId === id,
       roomId: roomId
-    });  
+    });
   });
 
   // 재경기 요청을 위해 방금 끝난 매치업 정보를 잠시 보관한다 (양쪽 모두 연결 상태일 때만).
@@ -833,9 +895,11 @@ io.on('connection', (socket) => {
     }
   });
 
-    socket.on('progress', (data) => {
+  socket.on('progress', (data) => {
     const room = rooms[socket.data.roomId];
     if (!room || room.ended) return;
+    // ★ START 신호 전에 들어온 입력은 무시한다 (카운트다운 중 선입력/조작 방지)
+    if (!room.started) return;
     const player = room.players[socket.id];
     if (!player || player.finished || player.disqualified) return;
 
@@ -922,14 +986,15 @@ io.on('connection', (socket) => {
     socket.data.customRoomCode = code;
     socket.emit('roomJoined', { code });
     room.players[0].emit('roomOpponentJoined');
-    const countdownSec = 3;
-    io.to(code).emit('customRoomCountdown', { seconds: countdownSec });
-    setTimeout(() => {
-      if (!customRooms[code]) return;
-      const [host, guest] = customRooms[code].players;
-      delete customRooms[code];
-      startMatch(host, guest, room.mode, room.duration, room.isRanked, code);
-    }, countdownSec * 1000);
+
+    // ★ 커스텀룸도 일반 매치와 동일하게 서버 주도 카운트다운(countdownTick)을 사용한다.
+    //   기존처럼 3초를 별도로 기다린 뒤 startMatch를 호출하면 카운트다운이 이중(3초 + 3초)이 되므로,
+    //   여기서는 화면 전환 신호만 보내고 즉시 매치를 시작한다.
+    io.to(code).emit('customRoomCountdown', { seconds: COUNTDOWN_SECONDS });
+
+    const [host, guest] = customRooms[code].players;
+    delete customRooms[code];
+    startMatch(host, guest, room.mode, room.duration, room.isRanked, code);
   });
 
   socket.on('cancelRoom', () => {
@@ -1061,7 +1126,8 @@ io.on('connection', (socket) => {
     if (!remainingId) return;
     endGame(roomId, remainingId, { reason: 'forfeit' });
   });
-    // --- 재경기(Rematch) ---
+
+  // --- 재경기(Rematch) ---
   socket.on('requestRematch', (data) => {
     data = data || {};
     const roomId = data.roomId;
@@ -1129,12 +1195,12 @@ io.on('connection', (socket) => {
     cleanupPendingRematch(roomId);
     delete recentMatches[roomId];
   });
-  
+
   socket.on('disconnect', () => {
     removeFromWaitingQueues(socket);
     clearPracticeSession(socket.id);
 
-        const myPid = socket.data.playerId;
+    const myPid = socket.data.playerId;
     if (myPid && playerIdToSocket[myPid] === socket.id) delete playerIdToSocket[myPid];
 
     // 재경기 대기/제안 중이었다면 상대에게 알리고 정리한다.
@@ -1155,17 +1221,18 @@ io.on('connection', (socket) => {
       else customRooms[cCode].players[0].emit('roomError', { message: 'Opponent left the room.' });
     }
 
-        const roomId = socket.data.roomId;
+    const roomId = socket.data.roomId;
     const room = rooms[roomId];
     if (room && !room.ended) {
       const remainingId = Object.keys(room.players).find((id) => id !== socket.id);
       if (remainingId) {
         // 남은 플레이어에게 몰수승(forfeit win) 처리.
         // endGame을 그대로 재사용해서 랭크전 MMR, 트로피, 일반전 승수까지
-        // 정상 경기 종료와 완전히 동일한 경로로 정산한다.
+        // 정상 경기 종료와 완전히 동일한 경로로 정산한다. (카운트다운 타이머도 endGame에서 정리됨)
         endGame(roomId, remainingId, { reason: 'forfeit' });
       } else {
         clearTimeout(room.endTimeoutId);
+        stopCountdown(room);
         delete rooms[roomId];
       }
     }

@@ -516,24 +516,18 @@
     let currentMode = 'time';
     let currentDuration = null;
     let sampleText = "";
-    let serverStartTime = null;
     let duration = null;
-    let countdownInterval = null;      // 매치 카운트다운(입력 활성화 담당) — gameStart만 시작한다
-    let roomCountdownInterval = null;  // 커스텀룸 표시 전용 카운트다운 (입력 활성화 없음)
-    let matchCountdownArmed = false;   // gameStart가 카운트다운을 이미 시작했는지
     let gameTimerInterval = null;
     let gameEnded = false;
 
-    // ★ 입력 활성화 안전장치용 상태
+    // ★ 서버 주도 카운트다운 상태 — 클라이언트는 Date.now()로 시작 시각을 계산하지 않는다.
     let matchActive = false;   // gameStart 수신 후 ~ gameOver/opponentLeft 전까지 true
-    let inGame = false;        // 카운트다운이 끝나 실제로 타이핑이 가능한 상태
+    let inGame = false;        // 서버 START 신호를 받아 실제로 타이핑이 가능한 상태
     let typingLocked = false;  // 문장 완료 / 시간 종료로 의도적으로 입력을 잠근 상태
-    let localEndAt = null;     // 로컬 performance.now() 기준 종료 시각 (시계 오차 영향 없음)
+    let localEndAt = null;     // START 수신 시점부터 performance.now()로 잰 "상대적" 종료 시각
     let inputWatchdog = null;
+    let pendingTick = null;    // gameStart보다 먼저 도착한 countdownTick 보관용
     let urlRoomHandled = false; // ?room= 파라미터 자동 입장은 한 번만
-
-    // 서버-클라이언트 시계 차이 보정값 (serverNow - clientNow)
-    let serverClockOffset = 0;
 
     let myRating = 1000;
     let myTrophies = 0;
@@ -577,18 +571,9 @@
     let currentView = 'play';
     let currentLeaderboardTab = 'rank';
 
-    /* ---------- 3-B) 서버 시계 동기화 ---------- */
-    function syncServerClock(serverNow) {
-      if (!Number.isFinite(serverNow)) return;
-      const offset = serverNow - Date.now();
-      // 단위 오류 등 비정상적으로 큰 값(5분 초과)은 무시하고 로컬 시계로 폴백
-      serverClockOffset = Math.abs(offset) < 5 * 60 * 1000 ? offset : 0;
-    }
-
-    // 서버 기준 "지금" 시각
-    function syncedNow() {
-      return Date.now() + serverClockOffset;
-    }
+    /* ---------- 3-B) (삭제됨) 서버 시계 동기화 ----------
+       카운트다운/시작은 서버의 countdownTick 이벤트로만 진행하므로
+       클라이언트-서버 시계 보정 로직이 필요 없다. */
 
     /* ---------- 4) 공통 UI ---------- */
     function setStatus(text) { setText('statusMessage', text || ''); }
@@ -827,11 +812,7 @@
 
     /* ---------- 9) 게임 초기화 / 매칭 ---------- */
     function clearAllCountdowns() {
-      clearInterval(countdownInterval);
-      clearInterval(roomCountdownInterval);
-      countdownInterval = null;
-      roomCountdownInterval = null;
-      matchCountdownArmed = false;
+      pendingTick = null;   // 카운트다운은 서버가 주도하므로 로컬 인터벌이 없다
     }
 
     function resetGameState() {
@@ -933,17 +914,16 @@
     });
 
     // 매치 확정 계열 이벤트 — 연습 중이면 연습을 즉시 종료하고 대기열 영역을 숨긴다.
-    // ★ 카운트다운 숫자는 여기서 표시하지 않는다. 서버가 준 절대 시작 시각(startTime)을
-    //   기준으로 gameStart 핸들러의 startCountdown()이 단독으로 3, 2, 1을 그린다.
+    // ★ 카운트다운 숫자는 오직 서버의 'countdownTick' 이벤트로만 표시한다.
     sub('matchFound', () => {
       abortPracticeForMatch();
       hideQueueControls();
       setTitle('Opponent found!');
     });
+    // (구버전 서버 호환용) 화면 전환만 하고 텍스트는 건드리지 않는다.
     sub('countdown', () => {
       abortPracticeForMatch();
       hideQueueControls();
-      if (!matchCountdownArmed) setTitle('Opponent found!');
     });
 
     /* ---------- 10) 커스텀 룸 ---------- */
@@ -1063,11 +1043,8 @@
 
     sub('roomOpponentJoined', () => { setStatus('Opponent joined the room!'); });
 
-    // ★ 커스텀룸 카운트다운 — "표시 전용".
-    //   - serverStartTime / countdownInterval / 입력창 상태를 절대 건드리지 않는다.
-    //   - gameStart가 이미 카운트다운을 시작했다면(순서가 뒤바뀐 경우) 아무것도 하지 않는다.
-    //   - 입력 활성화는 오직 gameStart → startCountdown()이 담당한다.
-    sub('customRoomCountdown', (data) => {
+    // ★ 커스텀룸 — 화면 전환만 담당한다. 3, 2, 1, START는 서버의 'countdownTick'이 처리한다.
+    sub('customRoomCountdown', () => {
       closeRoomModal();
       hideQueueControls();
       setDisplay('roomWaiting', 'none');
@@ -1075,24 +1052,6 @@
       setDisplay('gameArea', 'block');
       setDisplay('modeSelect', 'none');
       setDisplay('typeTab', 'none');
-
-      if (matchCountdownArmed || inGame) return;
-
-      syncServerClock(data && data.serverNow);
-      const target = (data && Number.isFinite(data.startTime))
-        ? data.startTime
-        : syncedNow() + (((data && data.seconds) || 3) * 1000);
-
-      clearInterval(roomCountdownInterval);
-      let lastShown = null;
-      const tick = () => {
-        const remainingMs = target - syncedNow();
-        if (remainingMs <= 0) { clearInterval(roomCountdownInterval); return; }
-        const sec = Math.ceil(remainingMs / 1000);
-        if (sec !== lastShown) { lastShown = sec; setTitle(`Starting in ${sec}...`); }
-      };
-      tick();
-      roomCountdownInterval = setInterval(tick, 50);
     });
 
     sub('roomError', (data) => {
@@ -1152,7 +1111,7 @@
     }
 
     /* =========================================================
-       11-A) 입력창 활성화 — 단일 진입점 + 안전장치(Watchdog)
+       11-A) 서버 주도 카운트다운 + 입력창 활성화
        ========================================================= */
 
     // 포커스만 시도 (disabled면 아무 것도 하지 않음)
@@ -1173,21 +1132,38 @@
       focusTypingInput();
     }
 
-    // ★ 카운트다운 종료 시점 단일 진입점 (여러 번 호출돼도 안전)
+    // ★ 서버 'countdownTick' 처리
+    //   - 숫자(3, 2, 1): 화면 텍스트만 갱신한다.
+    //   - 'START'(또는 0 / start:true): 입력창 해제 + 타이머 구동.
+    //   - payload는 { value: 3 } / { count: 3 } / 3 어느 형태든 받아준다.
+    function handleCountdownTick(data) {
+      if (gameEnded || practice.active) return;
+      if (!matchActive) { pendingTick = data; return; }   // gameStart보다 먼저 온 경우 보관
+      if (inGame) return;                                 // START 이후 늦게 온 틱은 무시
+
+      const raw = (data !== null && typeof data === 'object')
+        ? (data.value ?? data.count ?? data.seconds)
+        : data;
+      const isStart = (data && data.start === true)
+        || raw === 'START' || raw === 'start' || raw === 0 || raw === '0';
+
+      if (isStart) { enableTypingNow(); return; }
+
+      const n = Number(raw);
+      if (Number.isFinite(n) && n > 0) setTitle(`Starting in ${n}...`);
+    }
+
+    // ★ START 신호 수신 시점 단일 진입점 (여러 번 호출돼도 안전)
     function enableTypingNow() {
       if (gameEnded || practice.active) return;
 
       if (inGame) {
-        // 이미 시작된 상태 — 혹시 잠겨 있으면 다시 풀어준다.
         if (!typingLocked) forceEnableTyping();
         return;
       }
 
       inGame = true;
       typingLocked = false;
-
-      clearInterval(countdownInterval);
-      countdownInterval = null;
       setTitle('Start!');
 
       forceEnableTyping();
@@ -1201,18 +1177,9 @@
       startGameTimer();
     }
 
-    // ★ 안전장치: 카운트다운 콜백을 놓치거나 인터벌이 지연(백그라운드 탭 스로틀 등)돼도,
-    //   서버 시작 시각이 지났고 매치가 활성 상태면 무조건 입력창을 풀어준다.
+    // ★ 안전장치: START를 받은 뒤 어떤 이유로든 입력창이 잠겨 있으면(의도적 잠금 제외) 다시 풀어준다.
     function ensureTypingEnabled() {
-      if (!matchActive || gameEnded || practice.active) return;
-      if (!Number.isFinite(serverStartTime)) return;
-
-      if (!inGame) {
-        if (syncedNow() >= serverStartTime) enableTypingNow();
-        return;
-      }
-
-      if (typingLocked) return;
+      if (!matchActive || !inGame || gameEnded || practice.active || typingLocked) return;
       const ti = el('typingInput');
       if (ti && (ti.disabled || ti.readOnly)) forceEnableTyping();
     }
@@ -1222,50 +1189,12 @@
       inputWatchdog = setInterval(ensureTypingEnabled, 120);
     }
 
-    // ★ 서버가 준 절대 시작 시각(serverStartTime)과 서버 시계 보정된 "지금"의 차이로
-    //   매 틱마다 남은 시간을 새로 계산한다. 1초씩 깎는 방식이 아니므로 오차가 누적되지 않고,
-    //   양쪽 유저가 같은 순간에 Start!를 보게 된다.
-    function startCountdown() {
-      hideQueueControls();
-      clearAllCountdowns();
-      matchCountdownArmed = true;
-
-      // startTime이 비정상(NaN)이거나 현재 대비 지나치게 어긋나 있으면(클라이언트 시계 오차 등)
-      // 카운트다운이 영원히 끝나지 않거나 즉시 끝나버리므로 3초 뒤로 대체
-      if (!Number.isFinite(serverStartTime)
-          || serverStartTime - syncedNow() > 10000
-          || serverStartTime - syncedNow() < -5000) {
-        console.warn('[countdown] abnormal serverStartTime:', serverStartTime, 'now:', syncedNow());
-        serverStartTime = syncedNow() + 3000;
-      }
-
-      let lastShown = null;
-      const tick = () => {
-        const remainingMs = serverStartTime - syncedNow();
-        if (remainingMs <= 0) {
-          clearInterval(countdownInterval);
-          countdownInterval = null;
-          enableTypingNow();
-          return;
-        }
-        const sec = Math.ceil(remainingMs / 1000);
-        if (sec !== lastShown) {
-          lastShown = sec;
-          setTitle(`Starting in ${sec}...`);
-        }
-      };
-
-      tick();
-      if (!inGame) countdownInterval = setInterval(tick, 50);
-    }
-
-    // ★ 게임 타이머는 "입력이 열린 시점"부터의 로컬 경과 시간으로 계산한다.
-    //   클라이언트 시계가 서버와 크게 어긋나 있어도(외부 유저) 시작하자마자 타이머가 0이 되어
-    //   입력창이 잠기는 일이 없다. 실제 종료 판정은 서버가 한다.
+    // ★ 게임 타이머 — START를 받은 순간부터 performance.now()로 "경과 시간"만 잰다.
+    //   서로 다른 PC의 절대 시각(Date.now)을 비교하지 않으므로 시계 오차의 영향이 없다.
+    //   실제 종료 판정은 서버가 한다.
     function startGameTimer() {
       clearInterval(gameTimerInterval);
-      const lateMs = Math.min(1500, Math.max(0, syncedNow() - serverStartTime));
-      localEndAt = performance.now() + (Number(duration) || 0) * 1000 - lateMs;
+      localEndAt = performance.now() + (Number(duration) || 0) * 1000;
 
       const update = () => {
         const remaining = Math.max(0, Math.ceil((localEndAt - performance.now()) / 1000));
@@ -1530,11 +1459,12 @@
       removeCls('matchupBar', 'hidden-state');
     }
 
-    // ★ gameStart = 매치 카운트다운의 유일한 시작점.
-    //   서버가 보낸 startTime(절대 시각)과 serverNow(시계 보정용)를 받아 startCountdown()이 처리한다.
-    //   matchActive를 켜 두면, 카운트다운 콜백을 놓쳐도 Watchdog이 입력창을 풀어준다.
+    // ★ gameStart = 매치 "셋업" 신호 (텍스트/시간/상대 정보). 입력창은 아직 잠겨 있다.
+    //   이후 서버가 1초마다 보내는 'countdownTick'(3 → 2 → 1 → START)으로 화면을 갱신하고,
+    //   START 신호가 오면 양쪽 클라이언트가 동시에 입력창을 열고 타이머를 시작한다.
     sub('gameStart', (data) => {
       if (!data) return;
+      const early = pendingTick;      // gameStart보다 먼저 도착한 tick이 있으면 아래에서 재생
       const wasPracticing = practice.active;
       resetGameState();   // 연습 중이었다면 여기서 함께 종료된다
 
@@ -1542,11 +1472,9 @@
       currentDuration = data.duration;
       sampleText = data.text;
       duration = data.duration;
-      syncServerClock(data.serverNow);
-      serverStartTime = data.startTime;
       isRanked = !!data.isRanked;
 
-      matchActive = true;     // ★ 안전장치 활성화
+      matchActive = true;     // ★ 이제부터 countdownTick을 받아 처리한다
       inGame = false;
       typingLocked = false;
 
@@ -1562,6 +1490,7 @@
       setLobbyVisible(false);
 
       setText('modeBadge', `${data.isRanked ? '[Ranked] ' : '[Casual] '}${duration}s`);
+      setTitle('Opponent found!');
       setStatus(wasPracticing ? 'Opponent found! Practice ended — match starting!' : 'Opponent found!');
       setHTML('resultBanner', '');
       setClassName('resultBanner', 'result-banner');
@@ -1570,9 +1499,13 @@
 
       renderMatchupBar(data);
       renderQuote();
-      startCountdown();
       startInputWatchdog();
+
+      if (early) handleCountdownTick(early);
     });
+
+    // ★ 서버 주도 카운트다운 수신
+    sub('countdownTick', handleCountdownTick);
 
     sub('opponentProgress', (data) => {
       if (!oppCaretEl) return;
