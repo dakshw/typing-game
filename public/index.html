@@ -393,6 +393,8 @@
     </div>
   </div>
 
+  <div id="buildInfo" style="position:fixed; right:8px; bottom:6px; font-size:11px; color:#666; pointer-events:none;">client casual-no-trophy-v3 · server: connecting...</div>
+
   <div class="report-modal-overlay" id="reportModalOverlay">
     <div class="report-modal-box">
       <h3>⚠ Report Player</h3>
@@ -734,6 +736,7 @@
 
     sub('initUser', (data) => {
       if (!data) return;
+      setText('buildInfo', 'client casual-no-trophy-v3 · server: ' + (data.build || 'OLD (구버전 server.js 실행 중)'));
       myRating = data.rating;
       myTrophies = data.trophies || 0;
       if (data.name) myName = data.name;

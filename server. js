@@ -8,6 +8,7 @@ const server = http.createServer(app);
 const io = new Server(server, { cors: { origin: '*' } });
 
 const PORT = process.env.PORT || 3000;
+const BUILD_ID = 'casual-no-trophy-v3'; // 실행 중인 서버가 최신 파일인지 확인하는 용도 (화면 우측 하단에도 표시됨)
 app.use(express.static(path.join(__dirname, 'public')));
 
 function getTrophyChange(result, duration, isRanked) {
@@ -818,6 +819,7 @@ function sendInitUser(socket) {
     name: userNames[socket.id],
     avatar: userAvatars[socket.id],
     allowedAvatars: ALLOWED_AVATARS,
+    build: BUILD_ID,
     ...unlockPayload(socket),
     rankTag: rankTag
   });
@@ -1288,4 +1290,4 @@ io.on('connection', (socket) => {
   });
 });
 
-server.listen(PORT, () => console.log(`서버 실행 중: http://localhost:${PORT} [build: casual-no-trophy-v3]`));
+server.listen(PORT, () => console.log(`서버 실행 중: http://localhost:${PORT} [build: ${BUILD_ID}]`));
