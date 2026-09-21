@@ -768,6 +768,9 @@ function endGame(roomId, forcedWinnerId, options = {}) {
     });
   }
 
+  // [진단 로그] 이 판이 Ranked였는지, 트로피 변동이 얼마였는지 서버 콘솔에서 바로 확인할 수 있다.
+  console.log(`[EndGame] room=${roomId} isRanked=${room.isRanked} invalidated=${!!room.invalidated} trophyDiffs=${JSON.stringify(Object.fromEntries(ids.map((id) => [id, trophyChanges[id] ? trophyChanges[id].diff : null])))}`);
+
   ids.forEach((id) => {
     const oppId = ids.find((x) => x !== id);
     const playerSocket = io.sockets.sockets.get(id);
@@ -1282,4 +1285,4 @@ io.on('connection', (socket) => {
   });
 });
 
-server.listen(PORT, () => console.log(`서버 실행 중: http://localhost:${PORT}`));
+server.listen(PORT, () => console.log(`서버 실행 중: http://localhost:${PORT} [build: casual-no-trophy-v2]`));
