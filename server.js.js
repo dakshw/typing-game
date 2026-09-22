@@ -8,12 +8,18 @@ const server = http.createServer(app);
 const io = new Server(server, { cors: { origin: '*' } });
 
 const PORT = process.env.PORT || 3000;
-const BUILD_ID = 'casual-no-trophy-v3'; // 실행 중인 서버가 최신 파일인지 확인하는 용도 (화면 우측 하단에도 표시됨)
+const BUILD_ID = 'casual-no-trophy-v4'; // 실행 중인 서버가 최신 파일인지 확인하는 용도 (화면 우측 하단에도 표시됨)
 app.use(express.static(path.join(__dirname, 'public')));
+
+// ★ 랭크전 여부 판정은 반드시 이 함수 하나만 사용한다.
+//   오직 boolean true 일 때만 Ranked. (문자열 "false", 1, undefined 등은 전부 Casual 취급)
+function isRankedFlag(value) {
+  return value === true;
+}
 
 function getTrophyChange(result, duration, isRanked) {
   // ★ Casual(일반 매치 / 커스텀 룸)은 승패와 무관하게 항상 0
-  if (!isRanked) return 0;
+  if (!isRankedFlag(isRanked)) return 0;
   const base = result === 'win' ? 10 : result === 'lose' ? -3 : 0;
   const multiplier = duration === 30 ? 0.8 : duration === 120 ? 1.5 : 1.0;
   return Math.round(base * multiplier);
@@ -189,23 +195,10 @@ function appendDynamicTag(baseNick, rankTag) {
 }
 
 // ============================================================
-// ★ 수정됨: 랭킹 계산은 "현재 접속 중인 소켓" 단위가 아니라
+// ★ 랭킹 계산은 "현재 접속 중인 소켓" 단위가 아니라
 //   "계정(playerId)" 단위로, 그리고 접속 여부와 무관하게
 //   서버가 알고 있는 전체 계정 데이터(accountRatings 등)를 기준으로 계산한다.
 //
-//   기존 버그:
-//   1) userRatings는 socket.id를 key로 사용하는데, 소켓 disconnect 시
-//      해당 항목이 정리(삭제)되지 않아 접속 종료된 "유령 소켓" 데이터가
-//      영구적으로 랭킹 풀에 남아 계속 누적됨.
-//   2) 매 접속(새로고침)마다 새로운 socket.id가 생성되어 기본값(1000점 등)으로
-//      랭킹 풀에 추가되므로, 동점자가 많아지고 동점 처리 시 정렬 기준이
-//      명시적이지 않아(=Object 삽입 순서에 의존) 순위가 접속할 때마다
-//      달라지는 것처럼(사실상 무작위처럼) 보였음.
-//   3) buildPlayerTags는 entry.playerId를 찾는데, 기존 buildTopRankList는
-//      entry.id(=socket.id)만 채워서 반환했기 때문에 닉네임 랭크 태그는
-//      항상 매칭 실패로 빈 문자열이 되는 별도 버그도 있었음(이번에 같이 수정).
-//
-//   수정 후:
 //   - playerId(계정)별로 유일하게 하나의 항목만 존재하도록 dedupe.
 //   - 접속 중이면 최신 socket 기준 값(userRatings 등), 아니면 영구 저장된
 //     accountRatings/accountTrophies/accountNormalWins 값을 사용.
@@ -560,6 +553,7 @@ function detectSpeedLimit(player, room) {
 
 // 감지된 부정행위자를 즉시 몰수패 처리한다. endGame을 그대로 재사용하므로
 // 상대는 랭크 MMR/트로피/정상승수까지 일반 승리와 동일하게 정산된다.
+// (Casual이면 endGame 안에서 트로피/MMR이 항상 0으로 처리된다.)
 function disqualifyPlayer(roomId, cheaterId, reasonCode) {
   const room = rooms[roomId];
   if (!room || room.ended) return;
@@ -621,6 +615,9 @@ function runServerCountdown(roomId) {
 }
 
 function startMatch(playerA, playerB, mode, duration, isRanked, customRoomId) {
+  // ★ 랭크 여부를 여기서 엄격한 boolean으로 고정한다. (true 외에는 전부 Casual)
+  isRanked = isRankedFlag(isRanked);
+
   const roomId = customRoomId || `room_${playerA.id}_${playerB.id}_${Date.now()}`;
   const prevTextA = playerA.data.lastText || '';
   const text = generateUniqueText(mode, duration, prevTextA);
@@ -666,7 +663,8 @@ function startMatch(playerA, playerB, mode, duration, isRanked, customRoomId) {
   const basePayload = {
     mode, text,
     duration: mode === 'time' ? duration : null,
-    isRanked
+    isRanked,
+    isCasual: !isRanked
   };
 
   playerA.emit('gameStart', {
@@ -693,6 +691,10 @@ function endGame(roomId, forcedWinnerId, options = {}) {
   const reason = options.reason || null; // 'forfeit', 'cheat_detected' 등 — 클라이언트에 전달
   const cheatReason = options.cheatReason || null;
   const cheaterId = options.cheaterId || null;
+
+  // ★ 이 판이 Ranked인지 여부. 이후 모든 MMR/트로피 계산은 이 값 하나만 기준으로 한다.
+  const isRankedMatch = isRankedFlag(room.isRanked);
+  const isCasualMatch = !isRankedMatch;
 
   const ids = Object.keys(room.players);
   let winnerId = forcedWinnerId;
@@ -725,8 +727,9 @@ function endGame(roomId, forcedWinnerId, options = {}) {
     }
   }
 
+  // --- MMR(레이팅) 정산: Ranked 전용. Casual은 이 블록에 절대 진입하지 않는다. ---
   let ratingChanges = {};
-  if (room.isRanked && !room.invalidated && winnerId !== null) {
+  if (isRankedMatch && !room.invalidated && winnerId !== null) {
     const loserId = ids.find(id => id !== winnerId);
     const wRating = userRatings[winnerId] || 1000;
     const lRating = userRatings[loserId] || 1000;
@@ -739,22 +742,25 @@ function endGame(roomId, forcedWinnerId, options = {}) {
     ratingChanges[loserId] = { old: lRating, new: newLoserRating, diff: newLoserRating - lRating };
   }
 
+  // --- 일반전 승수(랭크 해금용): Casual에서만 카운트. 트로피/MMR과는 무관. ---
   let winnerUnlock = null;
-  if (!room.isRanked && !room.invalidated && winnerId !== null) {
+  if (isCasualMatch && !room.invalidated && winnerId !== null) {
     const winnerSocket = io.sockets.sockets.get(winnerId);
     if (winnerSocket) winnerUnlock = addNormalWin(winnerSocket);
   }
 
+  // --- 트로피 정산 ---
   const trophyChanges = {};
-  if (!room.isRanked) {
-    // ★ Casual(일반 매치 / 커스텀 룸): 승패와 무관하게 트로피·MMR 변동 없음 (diff 0)
+  if (isCasualMatch) {
+    // ★ Casual(일반 매치 / 커스텀 룸): 승패와 무관하게 트로피·MMR 변동 없음 (diff 0).
+    //   userTrophies / accountTrophies 는 건드리지 않는다.
     ids.forEach((id) => {
       trophyChanges[id] = { new: userTrophies[id] || 0, diff: 0 };
     });
   } else if (!room.invalidated) {
     ids.forEach((id) => {
       const res = winnerId === null ? 'draw' : (winnerId === id ? 'win' : 'lose');
-      const change = getTrophyChange(res, room.duration, room.isRanked);
+      const change = getTrophyChange(res, room.duration, isRankedMatch);
       userTrophies[id] = Math.max(0, (userTrophies[id] || 0) + change);
       trophyChanges[id] = { new: userTrophies[id], diff: change };
       const playerSocketForTrophy = io.sockets.sockets.get(id);
@@ -762,9 +768,14 @@ function endGame(roomId, forcedWinnerId, options = {}) {
     });
   } else {
     console.log(`[Anti-Abuse] Match rewards invalidated: ${roomId}`);
+    // 보상이 무효화된 Ranked도 클라이언트가 undefined를 받지 않도록 diff 0으로 채운다.
+    ids.forEach((id) => {
+      trophyChanges[id] = { new: userTrophies[id] || 0, diff: 0 };
+    });
   }
 
-  if (room.isRanked) {
+  // 레이팅 영구 저장은 Ranked에서만 수행한다.
+  if (isRankedMatch) {
     ids.forEach((id) => {
       const sock = io.sockets.sockets.get(id);
       if (sock) persistRatings(sock);
@@ -772,7 +783,7 @@ function endGame(roomId, forcedWinnerId, options = {}) {
   }
 
   // [진단 로그] 이 판이 Ranked였는지, 트로피 변동이 얼마였는지 서버 콘솔에서 바로 확인할 수 있다.
-  console.log(`[EndGame] room=${roomId} isRanked=${room.isRanked} invalidated=${!!room.invalidated} trophyDiffs=${JSON.stringify(Object.fromEntries(ids.map((id) => [id, trophyChanges[id] ? trophyChanges[id].diff : null])))}`);
+  console.log(`[EndGame] room=${roomId} isRanked=${isRankedMatch} invalidated=${!!room.invalidated} trophyDiffs=${JSON.stringify(Object.fromEntries(ids.map((id) => [id, trophyChanges[id] ? trophyChanges[id].diff : null])))}`);
 
   ids.forEach((id) => {
     const oppId = ids.find((x) => x !== id);
@@ -784,7 +795,8 @@ function endGame(roomId, forcedWinnerId, options = {}) {
       result: winnerId === null ? 'draw' : (winnerId === id ? 'win' : 'lose'),
       myStats: room.players[id],
       opponentStats: room.players[oppId],
-      ratingData: room.isRanked ? ratingChanges[id] : null,
+      // ★ Casual이면 ratingData는 항상 null (MMR 변동 없음)
+      ratingData: isRankedMatch ? (ratingChanges[id] || null) : null,
       trophyData: trophyChanges[id],
       unlock: playerSocket ? unlockPayload(playerSocket) : null,
       justUnlocked: !!(winnerUnlock && winnerId === id && winnerUnlock.justUnlocked),
@@ -795,13 +807,14 @@ function endGame(roomId, forcedWinnerId, options = {}) {
       cheatReason: cheatReason,
       disqualified: cheaterId === id,
       roomId: roomId,
-      isRanked: !!room.isRanked
+      isRanked: isRankedMatch,
+      isCasual: isCasualMatch
     });
   });
 
   // 재경기 요청을 위해 방금 끝난 매치업 정보를 잠시 보관한다 (양쪽 모두 연결 상태일 때만).
   if (ids.every((id) => { const s = io.sockets.sockets.get(id); return s && s.connected; })) {
-    recentMatches[roomId] = { playerIds: ids.slice(), mode: room.mode, duration: room.duration, isRanked: room.isRanked };
+    recentMatches[roomId] = { playerIds: ids.slice(), mode: room.mode, duration: room.duration, isRanked: isRankedMatch };
     setTimeout(() => { delete recentMatches[roomId]; }, RECENT_MATCH_TTL_MS);
   }
 
@@ -881,7 +894,8 @@ io.on('connection', (socket) => {
 
   socket.on('selectMode', (data) => {
     data = data || {};
-    const isRanked = !!data.isRanked;
+    // ★ 오직 boolean true 만 Ranked. 그 외 값(문자열 "false", 1, undefined 등)은 전부 Casual.
+    const isRanked = isRankedFlag(data.isRanked);
     const mode = 'time';
     const duration = ALLOWED_TIME_DURATIONS.includes(data.duration) ? data.duration : DEFAULT_TIME_DURATION;
 
@@ -998,6 +1012,7 @@ io.on('connection', (socket) => {
     const duration = ALLOWED_TIME_DURATIONS.includes(data.duration) ? data.duration : DEFAULT_TIME_DURATION;
     let code;
     do { code = generateRoomCode(); } while (customRooms[code]);
+    // ★ 커스텀 룸은 항상 Casual. 클라이언트가 isRanked를 보내도 무시한다.
     customRooms[code] = { mode, duration, isRanked: false, players: [socket] };
     socket.join(code);
     socket.data.customRoomCode = code;
@@ -1034,7 +1049,8 @@ io.on('connection', (socket) => {
 
     const [host, guest] = customRooms[code].players;
     delete customRooms[code];
-    startMatch(host, guest, room.mode, room.duration, room.isRanked, code);
+    // ★ 커스텀 룸은 항상 Casual (isRanked = false 고정)
+    startMatch(host, guest, room.mode, room.duration, false, code);
   });
 
   socket.on('cancelRoom', () => {
@@ -1214,7 +1230,8 @@ io.on('connection', (socket) => {
       const p1 = io.sockets.sockets.get(match.playerIds[0]);
       const p2 = io.sockets.sockets.get(match.playerIds[1]);
       if (p1 && p1.connected && p2 && p2.connected) {
-        startMatch(p1, p2, match.mode, match.duration, match.isRanked);
+        // 재경기는 직전 경기와 동일한 랭크 여부를 그대로 이어받는다 (Casual → Casual).
+        startMatch(p1, p2, match.mode, match.duration, isRankedFlag(match.isRanked));
       } else {
         match.playerIds.forEach((id) => {
           const s = io.sockets.sockets.get(id);
@@ -1279,9 +1296,6 @@ io.on('connection', (socket) => {
 
     // ★ 소켓 기준으로 남아있던 임시 랭킹 데이터(userRatings 등)는 계정(playerId)에
     //   이미 persist* 함수들을 통해 저장되어 있으므로, 소켓 자체 항목은 정리한다.
-    //   (정리하지 않으면 접속 종료된 유령 소켓 항목이 buildTopRankList의
-    //    "현재 접속 중" 루프에는 더 이상 잡히지 않지만, 메모리에 무한히
-    //    쌓이는 것을 막기 위해 명시적으로 삭제한다.)
     delete userRatings[socket.id];
     delete userNames[socket.id];
     delete userAvatars[socket.id];

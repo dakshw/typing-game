@@ -393,7 +393,7 @@
     </div>
   </div>
 
-  <div id="buildInfo" style="position:fixed; right:8px; bottom:6px; font-size:11px; color:#666; pointer-events:none;">client casual-no-trophy-v3 · server: connecting...</div>
+  <div id="buildInfo" style="position:fixed; right:8px; bottom:6px; font-size:11px; color:#666; pointer-events:none;">client casual-no-trophy-v4 · server: connecting...</div>
 
   <div class="report-modal-overlay" id="reportModalOverlay">
     <div class="report-modal-box">
@@ -736,7 +736,7 @@
 
     sub('initUser', (data) => {
       if (!data) return;
-      setText('buildInfo', 'client casual-no-trophy-v3 · server: ' + (data.build || 'OLD (구버전 server.js 실행 중)'));
+      setText('buildInfo', 'client casual-no-trophy-v4 · server: ' + (data.build || 'OLD (구버전 server.js 실행 중)'));
       myRating = data.rating;
       myTrophies = data.trophies || 0;
       if (data.name) myName = data.name;
@@ -1562,12 +1562,13 @@
 
     function renderMatchupBar(data) {
       const d = data || {};
+      const matchIsRanked = !!d.isRanked;
       setText('myAvatar', d.myAvatar || '😀');
       setText('oppAvatar', d.opponentAvatar || '👤');
       setText('myMatchupName', d.myName || 'Me');
       setText('oppMatchupName', d.opponentName || 'Opponent');
-      setText('myTierBadge', isRanked ? `MMR ${d.myRating ?? '-'}` : `🏆 ${d.myTrophies || 0}`);
-      setText('oppTierBadge', isRanked ? `MMR ${d.opponentRating ?? '-'}` : `🏆 ${d.opponentTrophies || 0}`);
+      setText('myTierBadge', matchIsRanked ? `MMR ${d.myRating ?? '-'}` : `🏆 ${d.myTrophies || 0}`);
+      setText('oppTierBadge', matchIsRanked ? `MMR ${d.opponentRating ?? '-'}` : `🏆 ${d.opponentTrophies || 0}`);
       renderRankBadge('myRankBadge', d.myRank);
       renderRankBadge('oppRankBadge', d.opponentRank);
       removeCls('matchupBar', 'hidden-state');
@@ -1586,6 +1587,8 @@
       currentDuration = data.duration;
       sampleText = data.text;
       duration = data.duration;
+      // ★ 이 매치의 랭크 여부는 오직 서버가 이번 gameStart에서 보낸 값만 믿는다.
+      //   (모드 탭에서 미리 눌러둔 값이나 이전 매치에서 남은 값과는 무관하게 매번 여기서 새로 고정한다.)
       isRanked = !!data.isRanked;
 
       matchActive = true;     // ★ 이제부터 countdownTick을 받아 처리한다
@@ -1803,9 +1806,14 @@
         tagText = data.disqualified ? '🚫 DISQUALIFIED (Cheat Detected)' : '🏆 WIN (Opponent Disqualified)';
       }
 
-      // ★ Casual(친선/커스텀 룸)은 서버 값과 무관하게 항상 "변동 없음"으로 표시한다.
-      const rankedMatch = (typeof data.isRanked === 'boolean') ? data.isRanked : isRanked;
-      const changeHtml = !rankedMatch
+      // ★ Casual(친선/커스텀 룸) 판정은 오직 이번 gameOver 이벤트가 실어 보낸 값만 믿는다.
+      //   탭에서 미리 눌러둔 Ranked 버튼 상태나 이전 매치에서 남아있던 전역 isRanked 값은
+      //   여기서 절대 fallback으로 쓰지 않는다 — 이게 바로 "Casual인데 트로피가 바뀌어 보이는" 원인이었다.
+      const rankedMatch = data.isRanked === true;
+      const casualMatch = !rankedMatch;
+
+      // Casual이면 서버가 뭘 보냈든(ratingData/trophyData) 무조건 "변동 없음"만 표시한다.
+      const changeHtml = casualMatch
         ? `<div class="rating-change" style="color:#888;">No Rank Change (+0 🏆 Trophies)</div>`
         : (data.ratingData
             ? `<div class="rating-change">${data.ratingData.diff >= 0 ? '+' : ''}${data.ratingData.diff} MMR (${data.ratingData.old} → ${data.ratingData.new})</div>`
