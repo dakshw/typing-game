@@ -28,9 +28,6 @@
     .unlock-bar-fill { height: 100%; width: 0%; background: var(--mt-yellow); transition: width 0.2s ease-out; }
     .unlock-done { color: #4caf50; font-size: 0.82rem; font-weight: bold; text-align: center; }
 
-    .user-info { margin-bottom: 15px; font-size: 1.1rem; color: #ccc; }
-    .user-info span { color: var(--mt-yellow); font-weight: bold; }
-
     .btn-restart { display: inline-block; margin-top: 20px; padding: 10px 20px; font-size: 1rem; background: #4caf50; color: #fff; border: none; border-radius: 5px; cursor: pointer; }
     .btn-restart:hover { background: #45a049; }
     .btn-secondary { background: transparent; border: 1px solid #555; color: #aaa; padding: 8px 14px; font-size: 0.85rem; margin-left: 10px; }
@@ -46,12 +43,6 @@
     .btn-mode:hover { border-color: #2196f3; transform: translateY(-2px); }
     .btn-mode .mode-title { font-weight: bold; font-size: 1.15rem; display: block; margin-bottom: 4px; }
     .btn-mode .mode-desc { font-size: 0.8rem; color: #999; }
-
-    .duration-select { display: none; flex-direction: column; align-items: center; gap: 10px; }
-    .duration-buttons { display: flex; gap: 12px; }
-    .btn-duration { padding: 14px 22px; font-size: 1.05rem; font-weight: bold; background: #1c1c1c; border: 2px solid #444; color: #fff; border-radius: 10px; cursor: pointer; }
-    .btn-duration:hover { border-color: #2196f3; }
-    .btn-back { margin-top: 4px; background: none; border: none; color: #888; font-size: 0.85rem; cursor: pointer; text-decoration: underline; }
 
     .game-area { display: none; }
     .type-area { position: relative; }
@@ -98,50 +89,28 @@
     .dash-stat-row .k { color: #888; }
     .dash-stat-row .v { color: #fff; font-weight: bold; }
 
-    .matchup-bar { display: flex; align-items: center; justify-content: space-between; gap: 10px; background: #1a1a1a; border: 1px solid #333; border-radius: 10px; padding: 14px 18px; margin-bottom: 14px; opacity: 1; max-height: 100px; overflow: hidden; transition: opacity 0.35s ease, max-height 0.35s ease, padding 0.35s ease, margin 0.35s ease, border-width 0.35s ease; }
-    .matchup-bar.hidden-state { opacity: 0; max-height: 0; padding-top: 0; padding-bottom: 0; margin-bottom: 0; border-width: 0; pointer-events: none; }
-    .matchup-player { flex: 1; display: flex; align-items: center; gap: 10px; min-width: 0; }
-    .matchup-player.opponent { flex-direction: row-reverse; text-align: right; }
-    .matchup-avatar { flex-shrink: 0; width: 44px; height: 44px; border-radius: 50%; background: #262626; border: 2px solid #555; display: flex; align-items: center; justify-content: center; font-weight: bold; font-size: 1.15rem; color: #fff; }
-    .matchup-info { min-width: 0; }
-    .matchup-info .player-name { font-weight: bold; font-size: 0.95rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    .matchup-info .tier-badge { display: inline-flex; align-items: center; gap: 4px; font-size: 0.72rem; font-weight: bold; padding: 2px 9px; border-radius: 10px; margin-top: 4px; border: 1px solid; white-space: nowrap; }
-    .matchup-vs { flex-shrink: 0; font-weight: bold; color: #555; font-size: 0.85rem; padding: 0 6px; }
+    .momentum-gauge { width: 100%; max-width: 100%; margin: 0 0 10px; opacity: 1; max-height: 60px; overflow: visible; transition: opacity 0.3s ease, max-height 0.3s ease, margin 0.3s ease; }
+    .momentum-gauge.hidden-state { opacity: 0; max-height: 0; margin: 0; pointer-events: none; overflow: hidden; }
+    .gauge-track { position: relative; width: 100%; height: 10px; background: #1a1a1a; border: 1px solid #333; border-radius: 6px; }
+    .gauge-center-line { position: absolute; top: -4px; left: 50%; width: 2px; height: 18px; background: #ca4754; transform: translateX(-50%); border-radius: 1px; box-shadow: 0 0 6px rgba(202,71,84,0.55); }
+    .gauge-indicator { position: absolute; top: -6px; left: 50%; width: 4px; height: 22px; background: #888; border-radius: 2px; transform: translateX(-50%); transition: left 0.16s ease-out, background 0.2s ease, box-shadow 0.2s ease; will-change: left; }
+    .gauge-indicator.winning { background: #4caf50; box-shadow: 0 0 10px rgba(76,175,80,0.85), 0 0 20px rgba(76,175,80,0.4); }
+    .gauge-indicator.losing { background: #ca4754; box-shadow: 0 0 10px rgba(202,71,84,0.85), 0 0 20px rgba(202,71,84,0.4); }
+    .gauge-indicator.overtake { animation: gaugeOvertake 0.4s ease; }
+    @keyframes gaugeOvertake {
+      0% { transform: translateX(-50%) scale(1); }
+      30% { transform: translateX(-50%) scale(1.7); }
+      55% { transform: translateX(-50%) scale(0.85); }
+      75% { transform: translateX(-50%) scale(1.25); }
+      100% { transform: translateX(-50%) scale(1); }
+    }
+    .gauge-labels { display: flex; justify-content: space-between; font-size: 0.68rem; color: #666; margin-top: 5px; letter-spacing: 0.5px; }
+    .gauge-labels .gauge-label-me { color: var(--mt-yellow); }
+    .gauge-labels .gauge-label-opp { color: #2196f3; }
 
-    .rank-badge {
-      display: inline-block;
-      font-weight: 800;
-      font-size: 0.72rem;
-      padding: 2px 8px;
-      border-radius: 10px;
-      margin-top: 4px;
-      margin-left: 0;
-      letter-spacing: 0.5px;
-      white-space: nowrap;
-      animation: rankPulse 2.2s ease-in-out infinite;
-    }
-    .rank-badge.hidden-badge { display: none !important; }
-    .rank-badge.rank-tier-1 {
-      color: #3a2400;
-      background: linear-gradient(135deg, #ffe066, #ffb200);
-      text-shadow: 0 0 4px #fff6d0;
-      box-shadow: 0 0 8px rgba(255, 215, 0, 0.85), 0 0 18px rgba(255, 178, 0, 0.4);
-    }
-    .rank-badge.rank-tier-3 {
-      color: #1c2733;
-      background: linear-gradient(135deg, #eef3f8, #b9c6d4);
-      text-shadow: 0 0 4px #ffffff;
-      box-shadow: 0 0 7px rgba(200, 210, 220, 0.8), 0 0 14px rgba(160, 180, 200, 0.35);
-    }
-    .rank-badge.rank-tier-10 {
-      color: #2e1707;
-      background: linear-gradient(135deg, #e2a86a, #cd7f32);
-      text-shadow: 0 0 4px #ffdca8;
-      box-shadow: 0 0 7px rgba(205, 127, 50, 0.75), 0 0 14px rgba(168, 98, 30, 0.3);
-    }
-
-    .user-info-row { display: flex; align-items: center; justify-content: center; gap: 10px; margin-bottom: 15px; }
-    .my-avatar-badge { width: 30px; height: 30px; border-radius: 50%; background: #1c1c1c; border: 1px solid #444; display: flex; align-items: center; justify-content: center; font-size: 1rem; }
+    .match-announce { text-align: center; font-size: 1.25rem; font-weight: bold; color: var(--mt-yellow); min-height: 1.5rem; margin: 2px 0 10px; opacity: 1; transition: opacity 0.4s ease; }
+    .match-announce.hidden-state { opacity: 0; pointer-events: none; }
+    .match-announce:empty { opacity: 0; }
 
     .private-section { margin-top: 18px; display: flex; flex-direction: column; align-items: center; gap: 10px; }
     .btn-private { padding: 12px 24px; font-size: 0.95rem; font-weight: bold; background: #1c1c1c; border: 2px solid #6c63ff; color: #6c63ff; border-radius: 10px; cursor: pointer; transition: border-color 0.15s, transform 0.15s; }
@@ -206,7 +175,7 @@
     .report-option.selected { border-color: #ca4754; background: rgba(202,71,84,0.08); }
     .report-option input[type="radio"] { accent-color: #ca4754; }
 
-    .lobby-header.hidden { display: none !important; }
+    #lobbyHeader.hidden { display: none !important; }
 
     .view { display: none; }
     .view.active { display: block; }
@@ -219,6 +188,11 @@
     .lb-fullpage .lb-avatar { font-size: 1.2rem; margin: 0 10px; }
     .lb-fullpage .lb-name { font-size: 1rem; }
     .lb-fullpage .lb-score { font-size: 1.05rem; min-width: 60px; }
+
+    /* 대기(큐/방) 상태 UI는 lobbyHeader 밖의 독립 레이어로 분리한다.
+       -> setLobbyVisible(false)가 실행돼도 이 화면들이 함께 사라지지 않는다 (검은 화면 버그 수정). */
+    #queueOverlay, #roomWaitOverlay { display: none; }
+    #queueOverlay.show, #roomWaitOverlay.show { display: block; }
   </style>
 </head>
 <body>
@@ -233,11 +207,6 @@
     <div id="lobbyHeader">
 
     <div class="view active" id="playView">
-      <div class="user-info-row">
-        <div class="my-avatar-badge" id="myAvatarBadge">😀</div>
-        <div class="user-info"><span id="myNameDisplay">Connecting...</span> · MMR <span id="myRatingDisplay">1000</span></div>
-      </div>
-
       <div class="tab-row" id="typeTab">
         <button class="tab-btn active" id="normalTabBtn" onclick="switchMatchKind(false)">Casual</button>
         <button class="tab-btn locked" id="rankedTabBtn" onclick="switchMatchKind(true)">
@@ -258,12 +227,6 @@
 
       <h2 id="title">Select Match Duration</h2>
       <div class="status-message" id="statusMessage"></div>
-      <div class="waiting-controls" id="waitingControls" style="display:none; margin-bottom: 14px;">
-        <div style="display:flex; gap:10px; justify-content:center;">
-          <button class="btn-restart" id="enterPracticeBtn" onclick="enterSoloPractice()">🎯 Enter Solo Practice</button>
-          <button class="btn-restart btn-secondary" onclick="cancelSearch()">✕ Cancel Queue</button>
-        </div>
-      </div>
 
       <div class="mode-select" id="modeSelect">
         <div class="mode-buttons" id="mainModeButtons">
@@ -293,16 +256,6 @@
           </div>
         </div>
       </div>
-
-      <div class="room-waiting" id="roomWaiting" style="display:none;">
-        <div class="code-label">Invite Code</div>
-        <div class="code-value" id="roomWaitingCode"></div>
-        <div>Waiting for opponent<span class="dots"></span></div>
-        <div style="margin-top:10px; display:flex; gap:8px; justify-content:center;">
-          <button class="btn-copy-link" id="copyInviteLinkBtn" style="display:none;" onclick="copyInviteLinkToClipboard()">📋 Copy Invite Link</button>
-          <button class="btn-close-room" onclick="cancelPrivateRoom()">✕ Leave Room</button>
-        </div>
-      </div>
     </div>
 
     <div class="view" id="rankView">
@@ -322,6 +275,34 @@
     </div>
     </div><!-- /lobbyHeader -->
 
+    <!-- ★ 매칭 대기 화면(큐 대기) — lobbyHeader 밖의 독립 오버레이.
+         setLobbyVisible(false)가 호출돼도 이 안의 버튼들은 사라지지 않는다 (검은 화면 버그 수정). -->
+    <div id="queueOverlay">
+      <h2 id="queueTitle">Finding opponent...</h2>
+      <div class="status-message" id="queueStatusMessage"></div>
+      <div class="waiting-controls" id="waitingControls" style="margin-top:14px;">
+        <div style="display:flex; gap:10px; justify-content:center;">
+          <button class="btn-restart" id="enterPracticeBtn" onclick="enterSoloPractice()">🎯 Enter Solo Practice</button>
+          <button class="btn-restart btn-secondary" onclick="cancelSearch()">✕ Cancel Queue</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ★ 커스텀 룸 대기 화면 — 마찬가지로 lobbyHeader 밖의 독립 오버레이. -->
+    <div id="roomWaitOverlay">
+      <h2 id="roomWaitTitle">Waiting in room...</h2>
+      <div class="status-message" id="roomWaitStatusMessage"></div>
+      <div class="room-waiting" id="roomWaiting">
+        <div class="code-label">Invite Code</div>
+        <div class="code-value" id="roomWaitingCode"></div>
+        <div>Waiting for opponent<span class="dots"></span></div>
+        <div style="margin-top:10px; display:flex; gap:8px; justify-content:center;">
+          <button class="btn-copy-link" id="copyInviteLinkBtn" style="display:none;" onclick="copyInviteLinkToClipboard()">📋 Copy Invite Link</button>
+          <button class="btn-close-room" onclick="cancelPrivateRoom()">✕ Leave Room</button>
+        </div>
+      </div>
+    </div>
+
     <div class="room-code-modal" id="roomCodeModal">
       <div class="room-code-box">
         <h3>🔗 Room Created!</h3>
@@ -335,27 +316,20 @@
     </div>
 
     <div class="game-area" id="gameArea">
-      <div class="mode-badge" id="modeBadge"></div>
-
-      <div class="matchup-bar hidden-state" id="matchupBar">
-        <div class="matchup-player me">
-          <div class="matchup-avatar" id="myAvatar">😀</div>
-          <div class="matchup-info">
-            <div class="player-name" id="myMatchupName">Player</div>
-            <span class="rank-badge hidden-badge" id="myRankBadge"></span>
-            <div class="tier-badge" id="myTierBadge">🏆 0</div>
-          </div>
+      <div class="momentum-gauge hidden-state" id="momentumGauge">
+        <div class="gauge-track">
+          <div class="gauge-center-line"></div>
+          <div class="gauge-indicator" id="gaugeIndicator"></div>
         </div>
-        <div class="matchup-vs">VS</div>
-        <div class="matchup-player opponent">
-          <div class="matchup-avatar" id="oppAvatar">👤</div>
-          <div class="matchup-info">
-            <div class="player-name" id="oppMatchupName">Opponent</div>
-            <span class="rank-badge hidden-badge" id="oppRankBadge"></span>
-            <div class="tier-badge" id="oppTierBadge">🏆 0</div>
-          </div>
+        <div class="gauge-labels">
+          <span class="gauge-label-me">YOU</span>
+          <span class="gauge-label-opp">OPP</span>
         </div>
       </div>
+
+      <div class="match-announce hidden-state" id="matchAnnounce"></div>
+
+      <div class="mode-badge" id="modeBadge"></div>
 
       <div class="type-area" id="typeArea">
         <div class="quote-viewport" id="quoteViewport">
@@ -393,7 +367,7 @@
     </div>
   </div>
 
-  <div id="buildInfo" style="position:fixed; right:8px; bottom:6px; font-size:11px; color:#666; pointer-events:none;">client casual-no-trophy-v4 · server: connecting...</div>
+  <div id="buildInfo" style="position:fixed; right:8px; bottom:6px; font-size:11px; color:#666; pointer-events:none;">client casual-trophy-v8 · server: connecting...</div>
 
   <div class="report-modal-overlay" id="reportModalOverlay">
     <div class="report-modal-box">
@@ -417,7 +391,14 @@
 
   <script>
     /* =========================================================
-       Speed Typing Test — Client Script
+       Speed Typing Test — Client Script (v8)
+       ★ v8 변경사항:
+       1) Space 입력 경로 단일화: keydown / input 폴백 / compositionend 모두 typeChar() 하나를 거치고,
+          Space는 handleSpace()에서만 처리한다.
+          - 현재 단어를 아직 한 글자도 안 쳤으면 Space 무시 (연속 Space / 중복 이벤트 방지)
+          - 단어가 끝난 위치(다음 글자가 공백)에서만 Space 수락 → 다음 단어 첫 글자와 공백이 비교될 수 없음
+          - applyTypedValue 최종 방어선: 공백이 들어갈 자리가 아닌 곳의 공백은 무조건 거부
+       2) 결과 화면: Casual 매치도 트로피 변동(+N / -N)과 총 트로피를 표시
        ========================================================= */
 
     /* ---------- 0) 전역 에러 표시 (원인 추적용) ---------- */
@@ -425,6 +406,8 @@
       try {
         const box = document.getElementById('statusMessage');
         if (box) box.innerText = `❌ JS Error: ${msg} (line ${line}:${col})`;
+        const qbox = document.getElementById('queueStatusMessage');
+        if (qbox) qbox.innerText = `❌ JS Error: ${msg} (line ${line}:${col})`;
       } catch (e) {}
       return false;
     };
@@ -444,7 +427,6 @@
     let socket = null;
     if (typeof io === 'undefined') {
       setText('statusMessage', '❌ socket.io 스크립트를 불러오지 못했습니다. (/socket.io/socket.io.js 확인)');
-      setText('myNameDisplay', 'Offline');
     } else {
       try {
         socket = io();
@@ -452,14 +434,12 @@
         setText('statusMessage', '❌ 서버 연결 초기화 실패: ' + e.message);
       }
     }
-    // socket이 null이어도 나머지 코드가 죽지 않도록 감싸는 래퍼
     function emit(event, payload) { if (socket) socket.emit(event, payload); }
     function sub(event, handler) { if (socket) socket.on(event, handler); }
 
     const LINE_HEIGHT = 38;
 
-    // 실전 모드(서버)와 동일한 텍스트 생성 로직을 클라이언트에 이식 (연습모드용)
-    // ★ 단어 풀: 총 300개 (중복 없음). server.js의 timeModeWordPool 배열과 반드시 동일해야 한다.
+    // 서버(server.js)와 완전히 동일해야 하는 단어 풀 (연습모드 텍스트 생성용). 총 300개, 중복 없음.
     const timeModeWordPool = [
       "the", "be", "to", "of", "and", "a", "in", "that", "have", "it",
       "for", "not", "on", "with", "he", "as", "you", "do", "at", "this",
@@ -493,7 +473,6 @@
       "teacher", "force", "offer", "enough", "education", "across", "although", "remember", "foot", "second"
     ];
 
-    // 안전장치: 단어 풀이 300개가 아니거나 중복이 있으면 콘솔에 경고한다.
     if (timeModeWordPool.length !== 300 || new Set(timeModeWordPool).size !== timeModeWordPool.length) {
       console.warn('[WordPool] 경고: 단어 수=' + timeModeWordPool.length + ', 고유 단어 수=' + new Set(timeModeWordPool).size + ' (300개/중복 없음이어야 함)');
     }
@@ -547,14 +526,13 @@
     let gameTimerInterval = null;
     let gameEnded = false;
 
-    // ★ 서버 주도 카운트다운 상태 — 클라이언트는 Date.now()로 시작 시각을 계산하지 않는다.
-    let matchActive = false;   // gameStart 수신 후 ~ gameOver/opponentLeft 전까지 true
-    let inGame = false;        // 서버 START 신호를 받아 실제로 타이핑이 가능한 상태
-    let typingLocked = false;  // 문장 완료 / 시간 종료로 의도적으로 입력을 잠근 상태
-    let localEndAt = null;     // START 수신 시점부터 performance.now()로 잰 "상대적" 종료 시각
+    let matchActive = false;
+    let inGame = false;
+    let typingLocked = false;
+    let localEndAt = null;
     let inputWatchdog = null;
-    let pendingTick = null;    // gameStart보다 먼저 도착한 countdownTick 보관용
-    let urlRoomHandled = false; // ?room= 파라미터 자동 입장은 한 번만
+    let pendingTick = null;
+    let urlRoomHandled = false;
 
     let myRating = 1000;
     let myTrophies = 0;
@@ -570,15 +548,22 @@
     let myCaretEl = null;
     let oppCaretEl = null;
 
+    let myCharIndex = 0;
+    let oppCharIndex = 0;
+    let gaugeSign = 0;
+    const GAUGE_MAX_DIFF = 30;
+    const GAUGE_MAX_PERCENT = 42;
+
+    let matchAnnounceHideTimer = null;
+
     let isCreatingPrivateRoom = false;
     let privateRoomCode = null;
-    let isPrivateRoomMatch = false;   // 커스텀룸(친선) 경기 여부
-    let isQueueWaiting = false;       // 서버 매칭 대기열에 들어가 있는 상태
+    let isPrivateRoomMatch = false;
+    let isQueueWaiting = false;
 
-    // Practice Mode 상태 — 매치와 동일한 입력 로직을 공유하며, 시간 제한만 없다.
     const practice = {
       active: false,
-      origin: null           // 'menu' | 'queue' — 종료 시 돌아갈 화면만 결정한다
+      origin: null
     };
 
     let lastOpponentId = null;
@@ -586,9 +571,6 @@
     let lastMatchStats = null;
     let selectedReportReason = null;
     const reportedMatchIds = new Set();
-
-    let lastKeystrokeTime = null;
-    let pendingDeltas = [];
 
     let rematchRoomId = null;
     let rematchDeadline = null;
@@ -598,13 +580,20 @@
     let currentView = 'play';
     let currentLeaderboardTab = 'rank';
 
-    /* ---------- 3-B) (삭제됨) 서버 시계 동기화 ----------
-       카운트다운/시작은 서버의 countdownTick 이벤트로만 진행하므로
-       클라이언트-서버 시계 보정 로직이 필요 없다. */
-
     /* ---------- 4) 공통 UI ---------- */
     function setStatus(text) { setText('statusMessage', text || ''); }
     function setTitle(text) { setText('title', text); }
+
+    // ★ 대기 화면(큐 / 커스텀룸)은 lobbyHeader 밖의 독립 오버레이라서 전용 setter를 쓴다.
+    //   (이전 버그: lobbyHeader를 통째로 숨기면서 그 안에 있던 대기 버튼/문구까지 함께 사라졌었음)
+    function setQueueTitle(text) { setText('queueTitle', text); }
+    function setQueueStatus(text) { setText('queueStatusMessage', text || ''); }
+    function setRoomWaitTitle(text) { setText('roomWaitTitle', text); }
+    function setRoomWaitStatus(text) { setText('roomWaitStatusMessage', text || ''); }
+    function showQueueOverlay() { addCls('queueOverlay', 'show'); }
+    function hideQueueOverlay() { removeCls('queueOverlay', 'show'); }
+    function showRoomWaitOverlay() { addCls('roomWaitOverlay', 'show'); }
+    function hideRoomWaitOverlay() { removeCls('roomWaitOverlay', 'show'); }
 
     function setLobbyVisible(visible) {
       const lobby = el('lobbyHeader');
@@ -626,7 +615,8 @@
     function showLobbyMenu() {
       teardownPractice();
       hideQueueControls();
-      setDisplay('roomWaiting', 'none');
+      hideQueueOverlay();
+      hideRoomWaitOverlay();
       setDisplay('gameArea', 'none');
       setDisplay('modeSelect', 'flex');
       setDisplay('typeTab', 'flex');
@@ -682,11 +672,12 @@
       }
     }
 
+    // 상단 프로필/랭크 박스는 UI에서 완전히 제거되었지만, 내부 상태값 자체는
+    // 결과 대시보드 등 다른 곳에서 계속 쓰이므로 변수는 유지한다. (화면에 그리지 않을 뿐)
     function updateTopBar() {
-      setText('myRatingDisplay', myRating);
-      setText('myNameDisplay', myName || 'Connecting...');
-      setText('myAvatarBadge', myAvatar || '😀');
-      setText('myTrophyDisplay', myTrophies);
+      myRating = myRating;
+      myName = myName;
+      myAvatar = myAvatar;
     }
 
     function switchMatchKind(ranked, silent) {
@@ -736,7 +727,7 @@
 
     sub('initUser', (data) => {
       if (!data) return;
-      setText('buildInfo', 'client casual-no-trophy-v4 · server: ' + (data.build || 'OLD (구버전 server.js 실행 중)'));
+      setText('buildInfo', 'client casual-trophy-v8 · server: ' + (data.build || 'OLD (구버전 server.js 실행 중)'));
       myRating = data.rating;
       myTrophies = data.trophies || 0;
       if (data.name) myName = data.name;
@@ -783,9 +774,12 @@
       const ti = el('typingInput');
       if (ti) ti.disabled = true;
       hideQueueControls();
+      hideQueueOverlay();
+      hideRoomWaitOverlay();
       setDisplay('gameArea', 'none');
       removeCls('roomCodeModal', 'show');
       removeCls('reportModalOverlay', 'show');
+      setLobbyVisible(true);
       setTitle('Session replaced');
       setStatus('⚠️ Other session connected — this tab has been disconnected.');
       alert('Other session connected.\nThis tab has been disconnected because the same account is now active elsewhere.');
@@ -840,7 +834,7 @@
 
     /* ---------- 9) 게임 초기화 / 매칭 ---------- */
     function clearAllCountdowns() {
-      pendingTick = null;   // 카운트다운은 서버가 주도하므로 로컬 인터벌이 없다
+      pendingTick = null;
     }
 
     function resetGameState() {
@@ -850,14 +844,11 @@
       teardownPractice();
       gameEnded = false;
 
-      // 안전장치 상태 초기화
       matchActive = false;
       inGame = false;
       typingLocked = false;
       localEndAt = null;
 
-      lastKeystrokeTime = null;
-      pendingDeltas = [];
       totalTyped = 0;
       totalErrors = 0;
       prevVal = "";
@@ -871,7 +862,9 @@
       const qd = el('quoteDisplay');
       if (qd) { qd.innerHTML = ''; qd.style.transform = 'translateY(0px)'; }
 
-      addCls('matchupBar', 'hidden-state');
+      resetGaugeState();
+      setGaugeVisible(false);
+      clearMatchAnnounce();
       setDisplay('practiceExitRow', 'none');
       setDisplay('leaveMatchRow', 'none');
     }
@@ -879,10 +872,11 @@
     function enterQueueUI() {
       setDisplay('modeSelect', 'none');
       setDisplay('typeTab', 'none');
-      setDisplay('roomWaiting', 'none');
+      hideRoomWaitOverlay();
       setLobbyVisible(false);
-      setTitle('Finding opponent...');
-      setStatus(isRanked ? 'Searching for a similar rank...' : 'Looking for an opponent...');
+      showQueueOverlay();
+      setQueueTitle('Finding opponent...');
+      setQueueStatus(isRanked ? 'Searching for a similar rank...' : 'Looking for an opponent...');
       setQueueControlsVisible(true);
     }
 
@@ -938,17 +932,14 @@
 
     sub('waiting', (data) => {
       setQueueControlsVisible(true);
-      setStatus((data && data.isRanked) ? 'Searching for a similar rank...' : 'Looking for an opponent...');
+      setQueueStatus((data && data.isRanked) ? 'Searching for a similar rank...' : 'Looking for an opponent...');
     });
 
-    // 매치 확정 계열 이벤트 — 연습 중이면 연습을 즉시 종료하고 대기열 영역을 숨긴다.
-    // ★ 카운트다운 숫자는 오직 서버의 'countdownTick' 이벤트로만 표시한다.
     sub('matchFound', () => {
       abortPracticeForMatch();
       hideQueueControls();
-      setTitle('Opponent found!');
+      setQueueTitle('Opponent found!');
     });
-    // (구버전 서버 호환용) 화면 전환만 하고 텍스트는 건드리지 않는다.
     sub('countdown', () => {
       abortPracticeForMatch();
       hideQueueControls();
@@ -972,10 +963,13 @@
       emit('joinRoom', { code });
       setStatus('Joining room...');
       hideQueueControls();
+      hideQueueOverlay();
       setDisplay('modeSelect', 'none');
       setDisplay('typeTab', 'none');
       setLobbyVisible(false);
-      setTitle('Joining room...');
+      showRoomWaitOverlay();
+      setRoomWaitTitle('Joining room...');
+      setRoomWaitStatus('');
     }
 
     function cancelPrivateRoom() {
@@ -1007,9 +1001,9 @@
     }
 
     function copyInviteLinkToClipboard() {
-      if (!privateRoomCode) { setStatus('⚠️ No active room.'); return; }
+      if (!privateRoomCode) { setRoomWaitStatus('⚠️ No active room.'); return; }
       const url = buildInviteUrl();
-      const done = () => setStatus('✅ Invite link copied!');
+      const done = () => setRoomWaitStatus('✅ Invite link copied!');
       if (navigator.clipboard && navigator.clipboard.writeText) {
         navigator.clipboard.writeText(url).then(done).catch(() => fallbackCopy(url, done));
       } else {
@@ -1028,9 +1022,6 @@
       }
     }
 
-    // ★ ?room=CODE 자동 입장은 최초 1회만 실행한다.
-    //   소켓이 재연결(connect 재발생)될 때마다 joinRoom을 다시 보내
-    //   진행 중인 매치 화면을 덮어쓰는 것을 방지한다.
     function checkUrlRoomParam() {
       if (urlRoomHandled || matchActive || inGame) return;
       const params = new URLSearchParams(window.location.search);
@@ -1047,17 +1038,18 @@
       privateRoomCode = data.code;
       isPrivateRoomMatch = true;
       hideQueueControls();
+      hideQueueOverlay();
       try { history.replaceState(null, '', '?room=' + data.code); } catch (e) {}
       setText('roomCodeDisplay', data.code);
       addCls('roomCodeModal', 'show');
       setText('roomWaitingCode', data.code);
-      setDisplay('roomWaiting', 'block');
       setDisplay('copyInviteLinkBtn', 'inline-block');
       setDisplay('modeSelect', 'none');
       setDisplay('typeTab', 'none');
       setLobbyVisible(false);
-      setTitle('Waiting in room...');
-      setStatus('');
+      showRoomWaitOverlay();
+      setRoomWaitTitle('Waiting in room...');
+      setRoomWaitStatus('');
     });
 
     sub('roomJoined', (data) => {
@@ -1065,29 +1057,31 @@
       privateRoomCode = data.code;
       isPrivateRoomMatch = true;
       hideQueueControls();
-      setTitle('Opponent joining soon...');
-      setStatus('');
+      showRoomWaitOverlay();
+      setRoomWaitTitle('Opponent joining soon...');
+      setRoomWaitStatus('');
     });
 
-    sub('roomOpponentJoined', () => { setStatus('Opponent joined the room!'); });
+    sub('roomOpponentJoined', () => { setRoomWaitStatus('Opponent joined the room!'); });
 
-    // ★ 커스텀룸 — 화면 전환만 담당한다. 3, 2, 1, START는 서버의 'countdownTick'이 처리한다.
     sub('customRoomCountdown', () => {
       closeRoomModal();
       hideQueueControls();
-      setDisplay('roomWaiting', 'none');
-      setStatus('');
+      hideRoomWaitOverlay();
+      hideQueueOverlay();
       setDisplay('gameArea', 'block');
       setDisplay('modeSelect', 'none');
       setDisplay('typeTab', 'none');
+      setLobbyVisible(false);
     });
 
     sub('roomError', (data) => {
-      setStatus('⚠️ ' + ((data && data.message) || 'Room error'));
+      const msg = '⚠️ ' + ((data && data.message) || 'Room error');
       privateRoomCode = null;
       isPrivateRoomMatch = false;
       isCreatingPrivateRoom = false;
       showLobbyMenu();
+      setStatus(msg);
     });
 
     /* ---------- 11) 렌더링 / 캐럿 / 타이머 ---------- */
@@ -1142,14 +1136,12 @@
        11-A) 서버 주도 카운트다운 + 입력창 활성화
        ========================================================= */
 
-    // 포커스만 시도 (disabled면 아무 것도 하지 않음)
     function focusTypingInput() {
       const ti = el('typingInput');
       if (!ti || ti.disabled) return;
       try { ti.focus({ preventScroll: true }); } catch (e) { try { ti.focus(); } catch (e2) {} }
     }
 
-    // disabled/readonly를 속성 레벨까지 확실히 제거하고 포커스를 준다.
     function forceEnableTyping() {
       const ti = el('typingInput');
       if (!ti) return;
@@ -1160,14 +1152,10 @@
       focusTypingInput();
     }
 
-    // ★ 서버 'countdownTick' 처리
-    //   - 숫자(3, 2, 1): 화면 텍스트만 갱신한다.
-    //   - 'START'(또는 0 / start:true): 입력창 해제 + 타이머 구동.
-    //   - payload는 { value: 3 } / { count: 3 } / 3 어느 형태든 받아준다.
     function handleCountdownTick(data) {
       if (gameEnded || practice.active) return;
-      if (!matchActive) { pendingTick = data; return; }   // gameStart보다 먼저 온 경우 보관
-      if (inGame) return;                                 // START 이후 늦게 온 틱은 무시
+      if (!matchActive) { pendingTick = data; return; }
+      if (inGame) return;
 
       const raw = (data !== null && typeof data === 'object')
         ? (data.value ?? data.count ?? data.seconds)
@@ -1178,10 +1166,11 @@
       if (isStart) { enableTypingNow(); return; }
 
       const n = Number(raw);
-      if (Number.isFinite(n) && n > 0) setTitle(`Starting in ${n}...`);
+      if (Number.isFinite(n) && n > 0) {
+        setMatchAnnounce(`Starting in ${n}...`);
+      }
     }
 
-    // ★ START 신호 수신 시점 단일 진입점 (여러 번 호출돼도 안전)
     function enableTypingNow() {
       if (gameEnded || practice.active) return;
 
@@ -1192,34 +1181,40 @@
 
       inGame = true;
       typingLocked = false;
-      setTitle('Start!');
+      // ★ "Start!" 문구는 화면 상단에 잠깐 떴다가 1초 뒤 자동으로 사라진다.
+      setMatchAnnounce('Start!', { autoHideMs: 1000 });
 
       forceEnableTyping();
-      // 렌더링/레이아웃 직후 포커스가 빠지는 경우를 대비한 재시도
       requestAnimationFrame(focusTypingInput);
       setTimeout(focusTypingInput, 60);
       setTimeout(focusTypingInput, 250);
+      setTimeout(focusTypingInput, 400);
 
-      addCls('matchupBar', 'hidden-state');
       setDisplay('leaveMatchRow', 'block');
       startGameTimer();
     }
 
-    // ★ 안전장치: START를 받은 뒤 어떤 이유로든 입력창이 잠겨 있으면(의도적 잠금 제외) 다시 풀어준다.
     function ensureTypingEnabled() {
-      if (!matchActive || !inGame || gameEnded || practice.active || typingLocked) return;
+      const canType = (matchActive && inGame) || practice.active;
+      if (!canType || gameEnded || typingLocked) return;
       const ti = el('typingInput');
-      if (ti && (ti.disabled || ti.readOnly)) forceEnableTyping();
+      if (!ti) return;
+      if (ti.disabled || ti.readOnly) { forceEnableTyping(); return; }
+      if (document.activeElement === ti) return;
+      const modal = el('reportModalOverlay');
+      if (modal && modal.classList.contains('show')) return;
+      const ae = document.activeElement;
+      if (ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA') && ae !== ti) return;
+      focusTypingInput();
     }
 
     function startInputWatchdog() {
       clearInterval(inputWatchdog);
-      inputWatchdog = setInterval(ensureTypingEnabled, 120);
+      // ★ 120ms -> 60ms: 소켓 이벤트로 포커스가 빠졌을 때 복구까지 걸리는 최대 지연을 절반으로 줄인다.
+      //   (근본 수정은 아래 typingInput 'blur' 리스너 — 이건 그걸 보조하는 안전망일 뿐)
+      inputWatchdog = setInterval(ensureTypingEnabled, 60);
     }
 
-    // ★ 게임 타이머 — START를 받은 순간부터 performance.now()로 "경과 시간"만 잰다.
-    //   서로 다른 PC의 절대 시각(Date.now)을 비교하지 않으므로 시계 오차의 영향이 없다.
-    //   실제 종료 판정은 서버가 한다.
     function startGameTimer() {
       clearInterval(gameTimerInterval);
       localEndAt = performance.now() + (Number(duration) || 0) * 1000;
@@ -1232,8 +1227,6 @@
           typingLocked = true;
           const ti = el('typingInput');
           if (ti) ti.disabled = true;
-          // 타임아웃 시 서버로 별도 emit이 필요 없다: 서버가 자체 setTimeout으로 endGame()을 호출하며,
-          // 그때 쓰이는 netCorrect는 대전 내내 보낸 'progress' emit들로 이미 서버에 누적되어 있다.
         }
       };
       update();
@@ -1242,9 +1235,6 @@
 
     /* =========================================================
        11-B) 타이핑 입력 — Practice와 매치가 완전히 동일한 로직을 공유한다.
-       · Practice: 타이머 없음, 문장을 다 치면 다음 문단으로 계속 진행, 서버 전송 없음.
-       · 매치: 서버 시간 제한, 문장을 다 치면 입력 잠금.
-       측정 지표는 Accuracy 하나뿐이다 (WPM 없음).
        ========================================================= */
 
     function showPracticeText(text) {
@@ -1259,20 +1249,19 @@
     function renderPracticeScreen(text) {
       setDisplay('modeSelect', 'none');
       setDisplay('typeTab', 'none');
-      setDisplay('roomWaiting', 'none');
+      hideQueueOverlay();
+      hideRoomWaitOverlay();
       setDisplay('waitingControls', 'none');
       setDisplay('gameArea', 'block');
       removeCls('roomCodeModal', 'show');
       setLobbyVisible(false);
 
-      setTitle('Solo Practice — type as long as you want');
       setStatus('');
       setText('modeBadge', '[Solo Practice — No Time Limit]');
       setHTML('resultBanner', '');
       setClassName('resultBanner', 'result-banner');
       setDisplay('restartRow', 'none');
       setDisplay('leaveMatchRow', 'none');
-      addCls('matchupBar', 'hidden-state');
 
       const timerEl = el('timer');
       if (timerEl && timerEl.parentElement) timerEl.parentElement.style.display = 'none';
@@ -1332,8 +1321,9 @@
 
       if (backToQueue) {
         setLobbyVisible(false);
-        setTitle('Finding opponent...');
-        setStatus('Still searching for an opponent...');
+        showQueueOverlay();
+        setQueueTitle('Finding opponent...');
+        setQueueStatus('Still searching for an opponent...');
         setQueueControlsVisible(true);
       } else {
         showLobbyMenu();
@@ -1363,12 +1353,6 @@
       setText('accuracy', computeAccuracy());
     }
 
-    // ★ 입력 판정 방식 (IME 무관)
-    //   기존: hidden input의 value를 그대로 읽어 원문과 비교했다.
-    //         한글 IME가 켜져 있으면 영문 키가 'ㅅ', 'ㅙ' 같은 한글로 조합되어
-    //         전부 오타로 판정되고(공백만 정답) Accuracy가 20%대로 폭락했다.
-    //   수정: keydown의 "물리 키(e.code)"로 영문 글자를 직접 확정해 자체 버퍼(prevVal)에 쌓고,
-    //         입력창 value는 판정에 사용하지 않는다. (가상 키보드처럼 e.code가 없는 환경만 input 이벤트로 보조 처리)
     let physicalKeyboardSeen = false;
 
     function keyEventToChar(e) {
@@ -1393,8 +1377,48 @@
       return true;
     }
 
+    // ★★★ [v8] 모든 문자 입력의 "단일 관문".
+    //   keydown / input 폴백 / compositionend 어느 경로로 들어오든 반드시 이 함수를 거친다.
+    //   Space(' ')는 일반 글자처럼 버퍼에 이어 붙이지 않고 handleSpace()에서만 처리한다.
+    function typeChar(ch) {
+      if (!canAcceptTyping()) return;
+      if (prevVal.length >= sampleText.length) return;
+      if (ch === ' ') { handleSpace(); return; }
+      applyTypedValue(prevVal + ch);
+    }
+
+    // ★★★ [v8] Space = "현재 단어 완료 → 다음 단어로 이동" 전용 처리.
+    //   - 다음 입력 위치(p)가 속한 단어의 시작 인덱스를 sampleText에서 직접 계산한다. (별도 상태값 없음 → Backspace와도 항상 일치)
+    //   - 현재 단어를 한 글자도 안 쳤으면(p === wordStart) Space 무시
+    //       → 연속 Space, 키 반복, 중복 이벤트가 와도 다음 단어 첫 글자 자리에 공백이 들어갈 수 없다.
+    //   - 단어가 끝난 위치(sampleText[p] === ' ')가 아니면 Space 무시 (단어 중간 Space가 오답 글자로 찍히지 않음)
+    //   - 위 조건을 통과한 Space만 "단어 사이 공백"으로 정확히 1글자 수락하고 커서를 다음 단어 첫 글자로 이동시킨다.
+    function handleSpace() {
+      const ti = el('typingInput');
+      if (ti) ti.value = ''; // 숨은 입력창 버퍼는 항상 비워서 공백이 남지 않게 한다
+
+      const p = prevVal.length;
+      const wordStart = p === 0 ? 0 : sampleText.lastIndexOf(' ', p - 1) + 1;
+      if (p === wordStart) return;          // 현재 단어를 아직 시작하지 않음
+      if (sampleText[p] !== ' ') return;    // 단어가 아직 끝나지 않았음
+      applyTypedValue(prevVal + ' ');
+    }
+
+    // ★★★ [버그 수정 - 스페이스 이중 입력]
+    //   같은 keydown 이벤트가 두 경로(input 직접 리스너 / document 포커스 복구 리스너)로
+    //   중복 처리되지 않도록 이벤트 객체에 처리 완료 마킹을 남긴다.
     function onTypingKeyDown(e) {
+      if (e.__typingHandled) return;
+      e.__typingHandled = true;
+
       if (e.code && e.code !== 'Unidentified') physicalKeyboardSeen = true;
+
+      // Space는 어떤 경우에도 브라우저 기본 동작(입력창에 공백 삽입 / 페이지 스크롤)을 막는다.
+      if (e.code === 'Space' || e.key === ' ') e.preventDefault();
+
+      // 키 반복(e.repeat)은 실제 타이핑으로 인정하지 않는다.
+      if (e.repeat) { e.preventDefault(); return; }
+
       if (!canAcceptTyping()) return;
       if (e.ctrlKey || e.metaKey || e.altKey) {
         if (e.key === 'Backspace') e.preventDefault();
@@ -1408,20 +1432,17 @@
       const ch = keyEventToChar(e);
       if (ch === null) return;
       e.preventDefault();
-      if (prevVal.length >= sampleText.length) return;
-      applyTypedValue(prevVal + ch);
+      typeChar(ch);
     }
 
     function appendAsciiChars(data) {
       for (const ch of String(data || '')) {
         if (!canAcceptTyping()) break;
         if (!/^[\x20-\x7E]$/.test(ch)) continue;
-        if (prevVal.length >= sampleText.length) break;
-        applyTypedValue(prevVal + ch);
+        typeChar(ch);
       }
     }
 
-    // 보조 경로: 물리 키보드(e.code)가 확인된 환경에서는 사용하지 않는다 (이중 집계 방지).
     function onTypingFallbackInput(e) {
       const ti = e.target;
       if (!ti) return;
@@ -1445,7 +1466,6 @@
       if (ti) ti.value = '';
     }
 
-    // 원문(sampleText)과 사용자가 입력한 문자열(value)을 비교해 화면/통계/서버 전송을 갱신한다.
     function applyTypedValue(value) {
       if (gameEnded) return;
       const ti = el('typingInput');
@@ -1453,7 +1473,12 @@
 
       const prev = prevVal;
 
-      // 새로 입력된 글자만 집계 (백스페이스 구간은 집계하지 않음)
+      // ★ [v8] 최종 방어선: 새로 추가되는 글자 중 "공백이 들어갈 자리가 아닌 곳"의 공백은 무조건 거부한다.
+      //   (어떤 경로에서 잘못 호출되더라도 공백이 다음 단어 글자와 비교되어 오답 처리되는 일이 없다)
+      for (let i = prev.length; i < value.length; i++) {
+        if (value[i] === ' ' && sampleText[i] !== ' ') { ti.value = ''; return; }
+      }
+
       for (let i = prev.length; i < value.length; i++) {
         totalTyped++;
         if (value[i] !== sampleText[i]) totalErrors++;
@@ -1467,7 +1492,6 @@
       updateAccuracyDisplay();
 
       if (!practice.active) {
-        // 서버는 'progress' 이벤트로 진행도를 받는다 (charIndex가 텍스트 길이에 도달하면 서버가 완료 처리).
         emit('progress', {
           charIndex: value.length,
           totalTyped,
@@ -1475,14 +1499,15 @@
           netCorrect: Math.max(0, totalTyped - totalErrors),
           accuracy: computeAccuracy()
         });
+        myCharIndex = value.length;
+        updateMomentumGauge();
       }
 
       if (value.length >= sampleText.length) {
         if (practice.active) {
           showPracticeText(generatePracticeText(sampleText));
         } else {
-          // 서버에 별도 완료 이벤트는 없다. 마지막 'progress' emit으로 서버가 100% 완료를 판정한다.
-          typingLocked = true;   // 안전장치가 다시 풀지 않도록 의도적 잠금 표시
+          typingLocked = true;
           ti.disabled = true;
           setStatus('✅ Finished! Waiting for time to run out or your opponent to finish...');
         }
@@ -1503,17 +1528,41 @@
       on('typingInput', 'input', onTypingFallbackInput);
       on('typingInput', 'compositionend', onTypingCompositionEnd);
 
-      // ★ 포커스 자동 이동 (1): 문장 영역 클릭
+      // ★ [포커스 씹힘 수정] input이 blur되는 "그 순간" 바로 재포커스를 시도해서 입력 유실 구간을 없앤다.
+      //   (모달이 열려 있거나 사용자가 다른 입력창/버튼을 의도적으로 클릭한 경우는 제외)
+      on('typingInput', 'blur', () => {
+        if (gameEnded || typingLocked) return;
+        if (!(inGame || practice.active)) return;
+        const modal = el('reportModalOverlay');
+        if (modal && modal.classList.contains('show')) return;
+        const roomModal = el('roomCodeModal');
+        if (roomModal && roomModal.classList.contains('show')) return;
+        const ae = document.activeElement;
+        if (ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA' || ae.tagName === 'BUTTON' || ae.tagName === 'A') && ae !== el('typingInput')) {
+          return; // 사용자가 의도적으로 다른 입력요소/버튼을 클릭한 경우엔 뺏어오지 않는다
+        }
+        setTimeout(focusTypingInput, 0);
+      });
+
       on('quoteViewport', 'click', focusTypingInput);
 
-      // ★ 포커스 자동 이동 (2): 게임 화면 아무 곳이나 클릭해도 입력창으로 포커스
       on('gameArea', 'click', () => {
         if (inGame || practice.active) focusTypingInput();
       });
 
-      // ★ 포커스 자동 이동 (3): 포커스가 빠진 상태에서 글자 키를 누르면 즉시 입력창으로 포커스
+      document.addEventListener('mousedown', (e) => {
+        if (!(inGame || practice.active) || gameEnded || typingLocked) return;
+        const target = e.target;
+        if (target && target.closest && target.closest('input, textarea, button, a, .report-modal-box, .room-code-box')) return;
+        if (!el('gameArea') || !el('gameArea').contains(target)) return;
+        focusTypingInput();
+      });
+
+      // ★ 포커스 자동 복구 경로 — key-repeat는 무시하고,
+      //   onTypingKeyDown 자체의 중복 마킹(__typingHandled)이 엘리먼트 직접 경로와의 중복 실행을 막는다.
       document.addEventListener('keydown', (e) => {
         if (!(inGame || practice.active) || gameEnded || typingLocked) return;
+        if (e.repeat) return;
         if (e.ctrlKey || e.metaKey || e.altKey) return;
         if (!e.key || (e.key.length !== 1 && e.key !== 'Process')) return;
         const ti = el('typingInput');
@@ -1523,10 +1572,9 @@
         const ae = document.activeElement;
         if (ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA')) return;
         ti.focus();
-        onTypingKeyDown(e);   // 포커스를 옮기는 이 키 입력도 놓치지 않고 바로 판정한다
+        onTypingKeyDown(e);
       });
 
-      // 탭 전환 / 창 포커스 복귀 시에도 즉시 상태 점검
       document.addEventListener('visibilitychange', () => {
         if (!document.hidden) { ensureTypingEnabled(); if (inGame && !typingLocked) focusTypingInput(); }
       });
@@ -1538,60 +1586,77 @@
 
     /* ---------- 13) 대전 시작 ---------- */
 
-    function getRankTierClass(rank) {
-      const r = Number(rank);
-      if (!Number.isFinite(r) || r < 1 || r > 100) return null;
-      if (r === 1) return 'rank-tier-1';
-      if (r <= 3) return 'rank-tier-3';
-      if (r <= 10) return 'rank-tier-10';
-      return 'rank-tier-100';
+    function setGaugeVisible(visible) {
+      toggleCls('momentumGauge', 'hidden-state', !visible);
     }
 
-    function renderRankBadge(elId, rank) {
-      const n = el(elId);
-      if (!n) return;
-      const tierClass = getRankTierClass(rank);
-      if (!tierClass) {
-        n.textContent = '';
-        n.className = 'rank-badge hidden-badge';
-        return;
+    function resetGaugeState() {
+      myCharIndex = 0;
+      oppCharIndex = 0;
+      gaugeSign = 0;
+      const ind = el('gaugeIndicator');
+      if (ind) {
+        ind.style.left = '50%';
+        ind.classList.remove('winning', 'losing', 'overtake');
       }
-      n.textContent = `#${Number(rank)}`;
-      n.className = `rank-badge ${tierClass}`;
     }
 
-    function renderMatchupBar(data) {
-      const d = data || {};
-      const matchIsRanked = !!d.isRanked;
-      setText('myAvatar', d.myAvatar || '😀');
-      setText('oppAvatar', d.opponentAvatar || '👤');
-      setText('myMatchupName', d.myName || 'Me');
-      setText('oppMatchupName', d.opponentName || 'Opponent');
-      setText('myTierBadge', matchIsRanked ? `MMR ${d.myRating ?? '-'}` : `🏆 ${d.myTrophies || 0}`);
-      setText('oppTierBadge', matchIsRanked ? `MMR ${d.opponentRating ?? '-'}` : `🏆 ${d.opponentTrophies || 0}`);
-      renderRankBadge('myRankBadge', d.myRank);
-      renderRankBadge('oppRankBadge', d.opponentRank);
-      removeCls('matchupBar', 'hidden-state');
+    function updateMomentumGauge() {
+      const ind = el('gaugeIndicator');
+      if (!ind) return;
+
+      const diff = myCharIndex - oppCharIndex;
+      const clamped = Math.max(-GAUGE_MAX_DIFF, Math.min(GAUGE_MAX_DIFF, diff));
+      const pct = (clamped / GAUGE_MAX_DIFF) * GAUGE_MAX_PERCENT;
+
+      ind.style.left = `${50 - pct}%`;
+
+      ind.classList.toggle('winning', diff > 0);
+      ind.classList.toggle('losing', diff < 0);
+
+      const newSign = diff > 0.0001 ? 1 : (diff < -0.0001 ? -1 : 0);
+      if (newSign !== 0 && gaugeSign !== 0 && newSign !== gaugeSign) {
+        ind.classList.remove('overtake');
+        void ind.offsetWidth;
+        ind.classList.add('overtake');
+      }
+      if (newSign !== 0) gaugeSign = newSign;
     }
 
-    // ★ gameStart = 매치 "셋업" 신호 (텍스트/시간/상대 정보). 입력창은 아직 잠겨 있다.
-    //   이후 서버가 1초마다 보내는 'countdownTick'(3 → 2 → 1 → START)으로 화면을 갱신하고,
-    //   START 신호가 오면 양쪽 클라이언트가 동시에 입력창을 열고 타이머를 시작한다.
+    function setMatchAnnounce(text, opts) {
+      const node = el('matchAnnounce');
+      if (!node) return;
+      if (matchAnnounceHideTimer) { clearTimeout(matchAnnounceHideTimer); matchAnnounceHideTimer = null; }
+      node.innerText = text || '';
+      toggleCls('matchAnnounce', 'hidden-state', !text);
+      const hideMs = opts && opts.autoHideMs;
+      if (text && hideMs) {
+        matchAnnounceHideTimer = setTimeout(() => {
+          addCls('matchAnnounce', 'hidden-state');
+          matchAnnounceHideTimer = null;
+        }, hideMs);
+      }
+    }
+
+    function clearMatchAnnounce() {
+      if (matchAnnounceHideTimer) { clearTimeout(matchAnnounceHideTimer); matchAnnounceHideTimer = null; }
+      const node = el('matchAnnounce');
+      if (node) node.innerText = '';
+      addCls('matchAnnounce', 'hidden-state');
+    }
+
     sub('gameStart', (data) => {
       if (!data) return;
-      const early = pendingTick;      // gameStart보다 먼저 도착한 tick이 있으면 아래에서 재생
-      const wasPracticing = practice.active;
-      resetGameState();   // 연습 중이었다면 여기서 함께 종료된다
+      const early = pendingTick;
+      resetGameState();
 
       currentMode = data.mode;
       currentDuration = data.duration;
       sampleText = data.text;
       duration = data.duration;
-      // ★ 이 매치의 랭크 여부는 오직 서버가 이번 gameStart에서 보낸 값만 믿는다.
-      //   (모드 탭에서 미리 눌러둔 값이나 이전 매치에서 남은 값과는 무관하게 매번 여기서 새로 고정한다.)
       isRanked = !!data.isRanked;
 
-      matchActive = true;     // ★ 이제부터 countdownTick을 받아 처리한다
+      matchActive = true;
       inGame = false;
       typingLocked = false;
 
@@ -1599,35 +1664,40 @@
       if (timerEl && timerEl.parentElement) timerEl.parentElement.style.display = '';
       setText('timer', duration);
 
-      setDisplay('modeSelect', 'none');
       hideQueueControls();
-      setDisplay('roomWaiting', 'none');
+      hideQueueOverlay();
+      hideRoomWaitOverlay();
+      setDisplay('modeSelect', 'none');
+      setDisplay('typeTab', 'none');
       setDisplay('gameArea', 'block');
       removeCls('roomCodeModal', 'show');
       setLobbyVisible(false);
 
       setText('modeBadge', `${data.isRanked ? '[Ranked] ' : '[Casual] '}${duration}s`);
-      setTitle('Opponent found!');
-      setStatus(wasPracticing ? 'Opponent found! Practice ended — match starting!' : 'Opponent found!');
+      // ★ "Opponent found!"도 Start!와 마찬가지로 1초 후 자동으로 사라진다.
+      setMatchAnnounce('Opponent found!', { autoHideMs: 1000 });
       setHTML('resultBanner', '');
       setClassName('resultBanner', 'result-banner');
       setDisplay('restartRow', 'none');
       setText('accuracy', 100);
 
-      renderMatchupBar(data);
       renderQuote();
+      resetGaugeState();
+      setGaugeVisible(true);
       startInputWatchdog();
 
       if (early) handleCountdownTick(early);
     });
 
-    // ★ 서버 주도 카운트다운 수신
     sub('countdownTick', handleCountdownTick);
 
     sub('opponentProgress', (data) => {
-      if (!oppCaretEl) return;
       const idx = (data && Number.isFinite(data.charIndex)) ? data.charIndex : 0;
-      positionCaret(oppCaretEl, idx);
+      if (oppCaretEl) positionCaret(oppCaretEl, idx);
+      oppCharIndex = idx;
+      updateMomentumGauge();
+      // ★ 소켓 데이터 수신으로 인한 포커스 이탈에 대한 추가 안전망 (저비용, idempotent)
+      ensureTypingEnabled();
     });
 
     /* ---------- 14) 재경기 ---------- */
@@ -1777,6 +1847,29 @@
         + `</div>`;
     }
 
+    // ★ [v8] 트로피/MMR 변동 표시 — Ranked / Casual 구분 없이 서버가 보낸 값을 그대로 표시한다.
+    //   - 트로피: 항상 표시 ("+10 🏆 Trophies (Total 42)" / "-3 🏆 Trophies (Total 39)" / "+0 🏆 Trophies")
+    //   - MMR: ratingData가 있을 때만 표시 (기본 설정에서는 Ranked 전용)
+    function buildChangeHtml(data) {
+      const td = data.trophyData || {};
+      const trophyDiff = Number.isFinite(td.diff) ? td.diff
+        : (Number.isFinite(data.trophyChange) ? data.trophyChange : 0);
+      const trophyTotal = Number.isFinite(td.new) ? td.new
+        : (Number.isFinite(data.totalTrophies) ? data.totalTrophies : null);
+      if (trophyTotal !== null) myTrophies = trophyTotal;
+
+      const trophyColor = trophyDiff > 0 ? '#4caf50' : (trophyDiff < 0 ? '#ca4754' : '#888');
+      const trophySign = trophyDiff > 0 ? '+' : '';
+      const trophyTotalText = trophyTotal !== null ? ` (Total ${trophyTotal})` : '';
+      const trophyHtml = `<div class="rating-change" style="color:${trophyColor};">${trophySign}${trophyDiff} 🏆 Trophies${trophyTotalText}</div>`;
+
+      const mmrHtml = data.ratingData
+        ? `<div class="rating-change">${data.ratingData.diff >= 0 ? '+' : ''}${data.ratingData.diff} MMR (${data.ratingData.old} → ${data.ratingData.new})</div>`
+        : '';
+
+      return mmrHtml + trophyHtml;
+    }
+
     sub('gameOver', (data) => {
       if (!data) return;
       gameEnded = true;
@@ -1786,6 +1879,7 @@
       clearAllCountdowns();
       clearInterval(gameTimerInterval);
       clearRematchState();
+      clearMatchAnnounce();
 
       const tiEnd = el('typingInput');
       if (tiEnd) tiEnd.disabled = true;
@@ -1794,7 +1888,6 @@
       if (data.roomId) lastRoomId = data.roomId;
       if (data.myStats) lastMatchStats = data.myStats;
 
-      updateTopBar();
       applyUnlockStatus(data.unlock, { justUnlocked: !!data.justUnlocked, unlockedNow: !!data.unlockedNow });
 
       const myStats = data.myStats || {};
@@ -1806,20 +1899,8 @@
         tagText = data.disqualified ? '🚫 DISQUALIFIED (Cheat Detected)' : '🏆 WIN (Opponent Disqualified)';
       }
 
-      // ★ Casual(친선/커스텀 룸) 판정은 오직 이번 gameOver 이벤트가 실어 보낸 값만 믿는다.
-      //   탭에서 미리 눌러둔 Ranked 버튼 상태나 이전 매치에서 남아있던 전역 isRanked 값은
-      //   여기서 절대 fallback으로 쓰지 않는다 — 이게 바로 "Casual인데 트로피가 바뀌어 보이는" 원인이었다.
-      const rankedMatch = data.isRanked === true;
-      const casualMatch = !rankedMatch;
-
-      // Casual이면 서버가 뭘 보냈든(ratingData/trophyData) 무조건 "변동 없음"만 표시한다.
-      const changeHtml = casualMatch
-        ? `<div class="rating-change" style="color:#888;">No Rank Change (+0 🏆 Trophies)</div>`
-        : (data.ratingData
-            ? `<div class="rating-change">${data.ratingData.diff >= 0 ? '+' : ''}${data.ratingData.diff} MMR (${data.ratingData.old} → ${data.ratingData.new})</div>`
-            : (data.trophyData
-                ? `<div class="rating-change">${data.trophyData.diff >= 0 ? '+' : ''}${data.trophyData.diff} 🏆 Trophies</div>`
-                : ''));
+      const changeHtml = buildChangeHtml(data);
+      updateTopBar();
 
       const alreadyReported = reportedMatchIds.has(lastRoomId || '');
       const oppName = data.opponentName || 'Opponent';
@@ -1862,6 +1943,7 @@
       clearAllCountdowns();
       clearInterval(gameTimerInterval);
       clearRematchState();
+      clearMatchAnnounce();
       const ti = el('typingInput');
       if (ti) ti.disabled = true;
       hideQueueControls();
