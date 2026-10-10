@@ -217,9 +217,8 @@ const DEFAULT_TIME_DURATION = 60;
 const COUNTDOWN_SECONDS = 3;
 const COUNTDOWN_TICK_MS = 1000;
 
-// ★ 랭크 해금에 필요한 일반전 승수. 지금은 테스트용으로 0 (일반전 승리 없이 바로 경쟁전 가능).
-//   테스트가 끝나면 3으로 되돌릴 것.
-const RANKED_UNLOCK_WINS = 0;
+// ★ 랭크 해금에 필요한 일반전 승수. (일반전 3승 달성 시 경쟁전 해금)
+const RANKED_UNLOCK_WINS = 3;
 
 // ★ [v15] Net Chars 산정 방식.
 //   클라이언트가 progress 이벤트에 `typed`(현재 화면에 입력되어 있는 문자열 전체)를 보내면,
