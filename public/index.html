@@ -48,12 +48,12 @@
     .type-area { position: relative; }
 
     .quote-viewport { position: relative; height: calc(var(--line-height) * 3); overflow: hidden; margin-bottom: 6px; text-align: left; cursor: text; }
-    .quote-display { position: relative; line-height: var(--line-height); font-size: 1.4rem; letter-spacing: 0.5px; color: #646669; transition: transform 0.25s ease; word-break: keep-all; }
-    .quote-display span.char { position: relative; }
+    .quote-display { position: relative; line-height: var(--line-height); font-size: 1.4rem; letter-spacing: 0.5px; color: #646669; transition: transform 0.3s cubic-bezier(.25,.8,.35,1); word-break: keep-all; }
+    .quote-display span.char { position: relative; transition: color 0.1s ease; }
     .correct { color: #d1d0c5; }
     .incorrect { color: #ca4754; text-decoration: underline; }
 
-    .caret { position: absolute; top: 3px; left: 0; width: 2px; height: 32px; background: var(--mt-yellow); border-radius: 1px; transition: transform 0.08s ease; pointer-events: none; display: none; }
+    .caret { position: absolute; top: 3px; left: 0; width: 2px; height: 32px; background: var(--mt-yellow); border-radius: 1px; pointer-events: none; display: none; will-change: transform; }
 
     .hidden-input { position: absolute; top: 0; left: 0; width: 1px; height: 1px; opacity: 0; }
     .type-hint { font-size: 0.8rem; color: #666; margin-bottom: 12px; }
@@ -154,7 +154,9 @@
     .lb-row.top2 .lb-rank { color: #c0c0c0; }
     .lb-row.top3 .lb-rank { color: #cd7f32; }
     .lb-rank { min-width: 50px; font-weight: bold; color: #666; text-align: left; flex-shrink: 0; }
-    .lb-avatar { margin: 0 8px; font-size: 1rem; }
+    .lb-avatar { display: inline-flex; align-items: center; margin: 0 8px; font-size: 1rem; color: #666; }
+    .lb-avatar svg { width: 1.1em; height: 1.1em; display: block; }
+    .lb-row.me .lb-avatar { color: var(--mt-yellow); }
     .lb-name { flex: 1; color: #ccc; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .lb-row.me .lb-name { color: var(--mt-yellow); font-weight: bold; }
     .lb-score { font-weight: bold; color: #fff; margin-left: 8px; min-width: 50px; text-align: right; }
@@ -189,10 +191,53 @@
     .lb-fullpage .lb-name { font-size: 1rem; }
     .lb-fullpage .lb-score { font-size: 1.05rem; min-width: 60px; }
 
-    /* 대기(큐/방) 상태 UI는 lobbyHeader 밖의 독립 레이어로 분리한다.
-       -> setLobbyVisible(false)가 실행돼도 이 화면들이 함께 사라지지 않는다 (검은 화면 버그 수정). */
     #queueOverlay, #roomWaitOverlay { display: none; }
     #queueOverlay.show, #roomWaitOverlay.show { display: block; }
+
+    /* ============ Streak (simple) ============ */
+    .streak-banner { display: inline-block; margin: 8px 0 4px; padding: 3px 10px; font-size: .8rem; font-weight: 600; border: 1px solid; border-radius: 6px; background: transparent; }
+    .streak-banner.tier1 { color:#ffb347; border-color:rgba(255,122,0,.5); }
+    .streak-banner.tier2 { color:#f5d76e; border-color:rgba(168,85,247,.5); }
+    .streak-banner.tier3 { color:#ffe066; border-color:rgba(255,215,0,.5); }
+    .streak-hud { display: none; font-size: 12px; font-weight: 600; padding: 3px 10px; }
+    .streak-hud.show { display: inline-block; }
+    .streak-hud.tier1 { color:#ffb347; }
+    .streak-hud.tier2 { color:#f5d76e; }
+    .streak-hud.tier3 { color:#ffe066; }
+
+    /* ============ VS banner ============ */
+    .vs-banner { display:flex; align-items:center; justify-content:space-between; gap:12px; margin:0 0 10px; padding:8px 14px; background:#1a1a1a; border:1px solid #333; border-radius:10px; transition: opacity .4s ease, max-height .4s ease, margin .4s ease, padding .4s ease; max-height: 80px; overflow: hidden; opacity: 1; }
+    .vs-side { flex:1; display:flex; align-items:center; gap:8px; min-width:0; }
+    .vs-side.opp { flex-direction:row-reverse; text-align:right; }
+    .vs-avatar { display:inline-flex; align-items:center; flex-shrink:0; font-size:1.5rem; }
+    .vs-avatar svg { width:1em; height:1em; display:block; }
+    .vs-side.me .vs-avatar { color:var(--mt-yellow); }
+    .vs-side.opp .vs-avatar { color:#2196f3; }
+    .vs-info { display:flex; flex-direction:column; min-width:0; }
+    .vs-name { font-size:.9rem; font-weight:bold; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    .vs-side.me .vs-name { color:var(--mt-yellow); }
+    .vs-side.opp .vs-name { color:#2196f3; }
+    .vs-streak { font-size:.75rem; color:#ffb347; min-height:1em; }
+    .vs-mid { font-size:.8rem; color:#666; font-weight:bold; }
+    .vs-banner.vs-fade { opacity: 0 !important; max-height: 0 !important; margin: 0 !important; padding-top: 0 !important; padding-bottom: 0 !important; border-width: 0 !important; pointer-events: none !important; }
+    .vs-banner.vs-gone { display: none !important; }
+    .pacer-caret { position: absolute; top: 3px; left: 0; width: 0; height: 32px; border-left: 2px dashed rgba(255,255,255,.55); background: rgba(255,255,255,.06); pointer-events: none; display: none; }
+    .pacer-toggle { padding: 4px 10px; font-size: .8rem; font-weight: bold; background: #1c1c1c; border: 1px solid var(--mt-yellow); color: var(--mt-yellow); border-radius: 12px; cursor: pointer; }
+    .pacer-toggle.off { border-color: #555; color: #888; }
+
+    /* ============ Toast ============ */
+    .toast-wrap { position: fixed; top: 18px; left: 50%; transform: translateX(-50%); z-index: 200; display: flex; flex-direction: column; gap: 8px; align-items: center; pointer-events: none; }
+    .toast { padding: 12px 20px; font-size: .95rem; font-weight: bold; background: #1c1c1c; color: #fff; border: 1px solid #4caf50; border-radius: 10px; box-shadow: 0 6px 20px rgba(0,0,0,.5); opacity: 0; transform: translateY(-10px); transition: opacity .25s ease, transform .25s ease; }
+    .toast.show { opacity: 1; transform: translateY(0); }
+    .toast.warn { border-color: #ffca28; color: #ffca28; }
+    .toast.error { border-color: #ca4754; color: #ca4754; }
+
+    /* 신고 모달 버튼 (기존에 스타일이 없었음) */
+    .modal-actions { display: flex; gap: 8px; justify-content: flex-end; }
+    .btn-cancel, .btn-save { padding: 8px 16px; font-size: .9rem; font-weight: bold; border-radius: 6px; cursor: pointer; }
+    .btn-cancel { background: transparent; border: 1px solid #555; color: #aaa; }
+    .btn-save { color: #fff; border: none; }
+    .btn-save:disabled { opacity: .5; cursor: not-allowed; }
   </style>
 </head>
 <body>
@@ -224,7 +269,7 @@
           <div class="unlock-bar-fill" id="unlockBarFill"></div>
         </div>
       </div>
-
+      <div style="text-align:center; margin-bottom:8px;"><span class="streak-hud"></span></div>
       <h2 id="title">Select Match Duration</h2>
       <div class="status-message" id="statusMessage"></div>
 
@@ -273,10 +318,15 @@
         </div>
       </div>
     </div>
-    </div><!-- /lobbyHeader -->
+    <div class="view" id="trophyView">
+      <div class="lb-fullpage">
+        <div class="lb-list" id="trophyLeaderboard">
+          <div class="lb-empty">Loading...</div>
+        </div>
+      </div>
+    </div>
+  </div><!-- /lobbyHeader -->
 
-    <!-- ★ 매칭 대기 화면(큐 대기) — lobbyHeader 밖의 독립 오버레이.
-         setLobbyVisible(false)가 호출돼도 이 안의 버튼들은 사라지지 않는다 (검은 화면 버그 수정). -->
     <div id="queueOverlay">
       <h2 id="queueTitle">Finding opponent...</h2>
       <div class="status-message" id="queueStatusMessage"></div>
@@ -288,7 +338,6 @@
       </div>
     </div>
 
-    <!-- ★ 커스텀 룸 대기 화면 — 마찬가지로 lobbyHeader 밖의 독립 오버레이. -->
     <div id="roomWaitOverlay">
       <h2 id="roomWaitTitle">Waiting in room...</h2>
       <div class="status-message" id="roomWaitStatusMessage"></div>
@@ -316,6 +365,18 @@
     </div>
 
     <div class="game-area" id="gameArea">
+      <div class="vs-banner" id="vsBanner" style="display:none;">
+        <div class="vs-side me">
+          <span class="vs-avatar"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-6 8-6s8 2 8 6z"/></svg></span>
+          <div class="vs-info"><span class="vs-name" id="vsMeName">You</span><span class="vs-streak" id="vsMeStreak"></span></div>
+        </div>
+        <div class="vs-mid">VS</div>
+        <div class="vs-side opp">
+          <span class="vs-avatar"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-6 8-6s8 2 8 6z"/></svg></span>
+          <div class="vs-info"><span class="vs-name" id="vsOppName">Opponent</span><span class="vs-streak" id="vsOppStreak"></span></div>
+        </div>
+      </div>
+
       <div class="momentum-gauge hidden-state" id="momentumGauge">
         <div class="gauge-track">
           <div class="gauge-center-line"></div>
@@ -329,8 +390,14 @@
 
       <div class="match-announce hidden-state" id="matchAnnounce"></div>
 
+      <div id="pacerPanel" style="display:none; align-items:center; justify-content:center; gap:10px; margin:8px 0; font-size:.85rem; color:#aaa;">
+        <span>🎯 Target</span>
+        <input type="range" id="pacerSlider" min="20" max="150" step="5" value="50" style="width:200px; accent-color:#e2b714;" oninput="onPacerSlider(this.value)" onchange="this.blur(); focusTypingInput();">
+        <button type="button" class="pacer-toggle" id="pacerToggleBtn" onclick="togglePacer(); this.blur(); focusTypingInput();">Target Line: ON</button>
+        <strong id="pacerValue" style="color:#e2b714; min-width:70px; text-align:left;">50 WPM</strong>
+      </div>
       <div class="mode-badge" id="modeBadge"></div>
-
+      <span class="streak-hud" style="margin-left:6px;"></span>
       <div class="type-area" id="typeArea">
         <div class="quote-viewport" id="quoteViewport">
           <div class="quote-display" id="quoteDisplay"></div>
@@ -346,6 +413,7 @@
 
       <div id="leaveMatchRow" style="margin-top:10px;">
         <button class="btn-secondary btn-leave-match" onclick="leaveCurrentMatch()">🚪 Leave Match (Forfeit)</button>
+        <button class="btn-secondary btn-leave-match" id="liveReportBtn" onclick="openReportModal()">⚠ 신고</button>
       </div>
 
       <div class="result-banner" id="resultBanner"></div>
@@ -366,42 +434,21 @@
       </div>
     </div>
   </div>
-
-  <div id="buildInfo" style="position:fixed; right:8px; bottom:6px; font-size:11px; color:#666; pointer-events:none;">client casual-trophy-v8 · server: connecting...</div>
-
+  <div id="buildInfo" style="position:fixed; right:8px; bottom:6px; font-size:11px; color:#666; pointer-events:none;">client casual-trophy-v9 · server: connecting...</div>
+  <div class="toast-wrap" id="toastWrap"></div>
   <div class="report-modal-overlay" id="reportModalOverlay">
     <div class="report-modal-box">
-      <h3>⚠ Report Player</h3>
-      <div style="font-size:0.85rem; color:#aaa; margin-bottom:12px;">Select a reason for reporting:</div>
-      <label class="report-option" onclick="selectReportReason('cheating', this)">
-        <input type="radio" name="reportReason" value="cheating"> Cheating / Auto-typer
-      </label>
-      <label class="report-option" onclick="selectReportReason('inappropriate_name', this)">
-        <input type="radio" name="reportReason" value="inappropriate_name"> Inappropriate Name
-      </label>
-      <label class="report-option" onclick="selectReportReason('other', this)">
-        <input type="radio" name="reportReason" value="other"> Other
-      </label>
-      <div class="modal-actions" style="margin-top:16px;">
-        <button class="btn-cancel" onclick="closeReportModal()">Cancel</button>
-        <button class="btn-save" style="background:#ca4754;" onclick="submitReport()">Submit Report</button>
+      <h3>⚠️ 신고</h3>
+      <div style="font-size:0.95rem; color:#ccc; margin-bottom:6px;">상대방을 핵/매크로 의심으로 신고하시겠습니까?</div>
+      <div class="modal-actions" style="margin-top:18px;">
+        <button class="btn-cancel" onclick="closeReportModal()">취소</button>
+        <button class="btn-save" style="background:#ca4754;" onclick="submitReport()">신고하기</button>
       </div>
     </div>
   </div>
-
   <script>
-    /* =========================================================
-       Speed Typing Test — Client Script (v8)
-       ★ v8 변경사항:
-       1) Space 입력 경로 단일화: keydown / input 폴백 / compositionend 모두 typeChar() 하나를 거치고,
-          Space는 handleSpace()에서만 처리한다.
-          - 현재 단어를 아직 한 글자도 안 쳤으면 Space 무시 (연속 Space / 중복 이벤트 방지)
-          - 단어가 끝난 위치(다음 글자가 공백)에서만 Space 수락 → 다음 단어 첫 글자와 공백이 비교될 수 없음
-          - applyTypedValue 최종 방어선: 공백이 들어갈 자리가 아닌 곳의 공백은 무조건 거부
-       2) 결과 화면: Casual 매치도 트로피 변동(+N / -N)과 총 트로피를 표시
-       ========================================================= */
+    /* Speed Typing Test — Client Script (v9, repaired) */
 
-    /* ---------- 0) 전역 에러 표시 (원인 추적용) ---------- */
     window.onerror = function (msg, src, line, col) {
       try {
         const box = document.getElementById('statusMessage');
@@ -412,7 +459,7 @@
       return false;
     };
 
-    /* ---------- 1) 널 세이프 DOM 헬퍼 ---------- */
+    /* ---------- 1) DOM helpers ---------- */
     function el(id) { return document.getElementById(id); }
     function setText(id, text) { const n = el(id); if (n) n.innerText = text; }
     function setHTML(id, html) { const n = el(id); if (n) n.innerHTML = html; }
@@ -423,7 +470,7 @@
     function toggleCls(id, cls, force) { const n = el(id); if (n) n.classList.toggle(cls, force); }
     function on(id, evt, handler) { const n = el(id); if (n) n.addEventListener(evt, handler); }
 
-    /* ---------- 2) 소켓 초기화 (로드 실패 방어) ---------- */
+    /* ---------- 2) Socket ---------- */
     let socket = null;
     if (typeof io === 'undefined') {
       setText('statusMessage', '❌ socket.io 스크립트를 불러오지 못했습니다. (/socket.io/socket.io.js 확인)');
@@ -439,7 +486,6 @@
 
     const LINE_HEIGHT = 38;
 
-    // 서버(server.js)와 완전히 동일해야 하는 단어 풀 (연습모드 텍스트 생성용). 총 300개, 중복 없음.
     const timeModeWordPool = [
       "the", "be", "to", "of", "and", "a", "in", "that", "have", "it",
       "for", "not", "on", "with", "he", "as", "you", "do", "at", "this",
@@ -472,10 +518,6 @@
       "walk", "reason", "low", "research", "early", "food", "before", "moment", "himself", "air",
       "teacher", "force", "offer", "enough", "education", "across", "although", "remember", "foot", "second"
     ];
-
-    if (timeModeWordPool.length !== 300 || new Set(timeModeWordPool).size !== timeModeWordPool.length) {
-      console.warn('[WordPool] 경고: 단어 수=' + timeModeWordPool.length + ', 고유 단어 수=' + new Set(timeModeWordPool).size + ' (300개/중복 없음이어야 함)');
-    }
 
     function isEasyTransition(prevWord, nextWord) {
       if (!prevWord) return false;
@@ -517,7 +559,7 @@
       return text;
     }
 
-    /* ---------- 3) 전역 상태 ---------- */
+    /* ---------- 3) State ---------- */
     let isRanked = false;
     let currentMode = 'time';
     let currentDuration = null;
@@ -534,10 +576,11 @@
     let pendingTick = null;
     let urlRoomHandled = false;
 
-    let myRating = 1000;
+    let myRating = 100;
     let myTrophies = 0;
     let myName = '';
     let myAvatar = '😀';
+    let myStreak = 0;
     let normalWins = 0;
     let requiredUnlockWins = 3;
     let rankedUnlocked = false;
@@ -560,14 +603,13 @@
     let privateRoomCode = null;
     let isPrivateRoomMatch = false;
     let isQueueWaiting = false;
-
-    const practice = {
-      active: false,
-      origin: null
-    };
+    let isFriendlyMatchNow = false;   // ★ 서버가 gameStart로 알려주는 친선(연습) 매치 여부
+    const practice = { active: false, origin: null };
 
     let lastOpponentId = null;
     let lastRoomId = null;
+    let currentRoomId = null;   // 진행 중인 경기의 roomId (gameStart 로 받음)
+    let reportTimeoutId = null;   // 신고 응답 대기 타이머 
     let lastMatchStats = null;
     let selectedReportReason = null;
     const reportedMatchIds = new Set();
@@ -580,12 +622,31 @@
     let currentView = 'play';
     let currentLeaderboardTab = 'rank';
 
-    /* ---------- 4) 공통 UI ---------- */
+    let pendingOppInfo = {};
+
+    // ★ [랭킹] 대전 중 키 입력 간격(ms) 기록용
+    let keyDeltas = [];
+    let lastKeyAt = null;
+    let currentWpmDuration = 60;
+    /* ---------- 4) Common UI ---------- */
     function setStatus(text) { setText('statusMessage', text || ''); }
+
+    // 화면 상단에 잠깐 떴다 사라지는 알림. type: 'success'(기본) | 'warn' | 'error'
+    function showToast(message, type) {
+      const wrap = el('toastWrap');
+      if (!wrap) return;
+      const t = document.createElement('div');
+      t.className = 'toast ' + (type || 'success');
+      t.innerText = message;
+      wrap.appendChild(t);
+      requestAnimationFrame(() => t.classList.add('show'));
+      setTimeout(() => {
+        t.classList.remove('show');
+        setTimeout(() => { if (t.parentNode) t.parentNode.removeChild(t); }, 300);
+      }, 2500);
+    }
     function setTitle(text) { setText('title', text); }
 
-    // ★ 대기 화면(큐 / 커스텀룸)은 lobbyHeader 밖의 독립 오버레이라서 전용 setter를 쓴다.
-    //   (이전 버그: lobbyHeader를 통째로 숨기면서 그 안에 있던 대기 버튼/문구까지 함께 사라졌었음)
     function setQueueTitle(text) { setText('queueTitle', text); }
     function setQueueStatus(text) { setText('queueStatusMessage', text || ''); }
     function setRoomWaitTitle(text) { setText('roomWaitTitle', text); }
@@ -625,15 +686,12 @@
       setTitle('Select Match Duration');
     }
 
-    /* ---------- 5) 결과 화면 버튼 분기 ---------- */
+    /* ---------- 5) Post-match buttons ---------- */
     function setPostMatchButtons() {
       setDisplay('restartRow', 'block');
       const rematchBtnEl = el('rematchBtn');
       const findNextBtnEl = el('findNextBtn');
-      if (!rematchBtnEl || !findNextBtnEl) {
-        console.warn('[UI] rematchBtn 또는 findNextBtn 요소를 찾지 못했습니다.');
-        return;
-      }
+      if (!rematchBtnEl || !findNextBtnEl) return;
       if (isPrivateRoomMatch) {
         rematchBtnEl.style.display = '';
         findNextBtnEl.style.display = 'none';
@@ -643,7 +701,7 @@
       }
     }
 
-    /* ---------- 6) 언락 / 상단바 ---------- */
+    /* ---------- 6) Unlock ---------- */
     function applyUnlockStatus(data, options) {
       if (!data) return;
       const opts = options || {};
@@ -672,8 +730,6 @@
       }
     }
 
-    // 상단 프로필/랭크 박스는 UI에서 완전히 제거되었지만, 내부 상태값 자체는
-    // 결과 대시보드 등 다른 곳에서 계속 쓰이므로 변수는 유지한다. (화면에 그리지 않을 뿐)
     function updateTopBar() {
       myRating = myRating;
       myName = myName;
@@ -689,9 +745,10 @@
       toggleCls('normalTabBtn', 'active', !ranked);
       toggleCls('rankedTabBtn', 'active', ranked);
       if (!silent) setStatus('');
+      setStreakHud(myStreak);
     }
 
-    /* ---------- 7) 접속 / 식별 ---------- */
+    /* ---------- 7) Connect / identify ---------- */
     function getOrCreatePlayerCode() {
       const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
       const makeCode = () => {
@@ -727,9 +784,10 @@
 
     sub('initUser', (data) => {
       if (!data) return;
-      setText('buildInfo', 'client casual-trophy-v8 · server: ' + (data.build || 'OLD (구버전 server.js 실행 중)'));
+      setText('buildInfo', 'client casual-trophy-v9 · server: ' + (data.build || 'OLD (구버전 server.js 실행 중)'));
       myRating = data.rating;
       myTrophies = data.trophies || 0;
+      setStreakHud(data.streak);
       if (data.name) myName = data.name;
       if (data.avatar) myAvatar = data.avatar;
       applyUnlockStatus(data);
@@ -785,7 +843,7 @@
       alert('Other session connected.\nThis tab has been disconnected because the same account is now active elsewhere.');
     });
 
-    /* ---------- 8) 뷰 / 리더보드 ---------- */
+    /* ---------- 8) Views / leaderboard ---------- */
     function switchView(view) {
       currentView = view;
       document.querySelectorAll('.header-tab').forEach((btn) => {
@@ -794,17 +852,59 @@
       toggleCls('playView', 'active', view === 'play');
       toggleCls('rankView', 'active', view === 'rank');
       toggleCls('trophyView', 'active', view === 'trophy');
+      toggleCls('wpmView', 'active', view === 'wpm');
       if (view === 'rank' || view === 'trophy') {
         currentLeaderboardTab = view;
         fetchLeaderboard();
       }
+      if (view === 'wpm') fetchWpmLeaderboard();
     }
 
     function fetchLeaderboard() {
       if (!socket || !socket.connected) return;
       emit('requestLeaderboard', { sortBy: currentLeaderboardTab });
     }
+    function escapeHtml(s) {
+      return String(s == null ? '' : s).replace(/[&<>"']/g, (c) => (
+        { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
+      ));
+    }
 
+    function setWpmDuration(sec) {
+      currentWpmDuration = sec;
+      [30, 60, 120].forEach((s) => toggleCls('wpmTab' + s, 'active', s === sec));
+      fetchWpmLeaderboard();
+    }
+
+    function fetchWpmLeaderboard() {
+      if (!socket || !socket.connected) return;
+      emit('requestWpmLeaderboard', { duration: currentWpmDuration });
+    }
+
+    sub('wpmLeaderboardData', (data) => {
+      if (!data || !el('wpmLeaderboard')) return;
+      if (data.duration !== currentWpmDuration) return;
+      if (!data.entries || data.entries.length === 0) {
+        setHTML('wpmLeaderboard', '<div class="lb-empty">아직 등록된 기록이 없습니다.</div>');
+        return;
+      }
+      const medals = ['🥇', '🥈', '🥉'];
+      let html = '';
+      data.entries.forEach((entry) => {
+        const rank = entry.rank;
+        const rankDisplay = rank <= 3 ? `${medals[rank - 1]} #${rank}` : `#${rank}`;
+        const rowClass = 'lb-row'
+          + (entry.isMe ? ' me' : '')
+          + (rank === 1 ? ' top1' : rank === 2 ? ' top2' : rank === 3 ? ' top3' : '');
+        html += `<div class="${rowClass}">`
+          + `<span class="lb-rank">${rankDisplay}</span>`
+          + `<span class="lb-name">${escapeHtml(entry.name)}</span>`
+          + `<span class="lb-score">${entry.wpm} WPM</span>`
+          + `<span class="lb-score" style="color:#888; min-width:50px;">${entry.accuracy}%</span>`
+          + `</div>`;
+      });
+      setHTML('wpmLeaderboard', html);
+    });
     sub('leaderboardData', (data) => {
       if (!data) return;
       const targetId = data.sortBy === 'rank' ? 'rankLeaderboard' : 'trophyLeaderboard';
@@ -824,7 +924,7 @@
         const score = data.sortBy === 'rank' ? entry.rating : entry.trophies;
         html += `<div class="${rowClass}">`
           + `<span class="lb-rank">${rankDisplay}</span>`
-          + `<span class="lb-avatar">${entry.avatar}</span>`
+          + `<span class="lb-avatar"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-6 8-6s8 2 8 6z"/></svg></span>`
           + `<span class="lb-name">${entry.name}</span>`
           + `<span class="lb-score">${score}</span>`
           + `</div>`;
@@ -832,12 +932,13 @@
       setHTML(targetId, html);
     });
 
-    /* ---------- 9) 게임 초기화 / 매칭 ---------- */
+    /* ---------- 9) Reset / matchmaking ---------- */
     function clearAllCountdowns() {
       pendingTick = null;
     }
 
     function resetGameState() {
+      clearStreakEffects();
       clearAllCountdowns();
       clearInterval(gameTimerInterval);
       clearRematchState();
@@ -852,7 +953,8 @@
       totalTyped = 0;
       totalErrors = 0;
       prevVal = "";
-
+      keyDeltas = [];
+      lastKeyAt = null;
       const timerEl = el('timer');
       if (timerEl && timerEl.parentElement) timerEl.parentElement.style.display = '';
 
@@ -864,6 +966,7 @@
 
       resetGaugeState();
       setGaugeVisible(false);
+      setDisplay('vsBanner', 'none');
       clearMatchAnnounce();
       setDisplay('practiceExitRow', 'none');
       setDisplay('leaveMatchRow', 'none');
@@ -935,7 +1038,9 @@
       setQueueStatus((data && data.isRanked) ? 'Searching for a similar rank...' : 'Looking for an opponent...');
     });
 
-    sub('matchFound', () => {
+    sub('matchFound', (data) => {
+      pendingOppInfo = {};
+      rememberOpp(data);
       abortPracticeForMatch();
       hideQueueControls();
       setQueueTitle('Opponent found!');
@@ -945,7 +1050,7 @@
       hideQueueControls();
     });
 
-    /* ---------- 10) 커스텀 룸 ---------- */
+    /* ---------- 10) Custom room ---------- */
     function startPrivateRoom() {
       isCreatingPrivateRoom = true;
       setStatus('Select duration for custom room');
@@ -1084,7 +1189,7 @@
       setStatus(msg);
     });
 
-    /* ---------- 11) 렌더링 / 캐럿 / 타이머 ---------- */
+    /* ---------- 11) Render / caret ---------- */
     function renderQuote() {
       const qd = el('quoteDisplay');
       if (!qd) return;
@@ -1105,18 +1210,54 @@
       updateViewportScroll(0);
     }
 
+    /* 커서는 목표 위치를 매 프레임 부드럽게 따라간다 (글자마다 끊기지 않음). */
+    const CARET_SMOOTH_TAU_MS = 60;   // 작을수록 빠르게 따라붙고, 클수록 더 부드럽게 미끄러진다
+    const smoothCarets = new Set();
+    let caretRaf = null;
+    let caretLastTs = 0;
+
+    function caretFrame(ts) {
+      const dt = Math.min(64, ts - caretLastTs || 16);
+      caretLastTs = ts;
+      const k = 1 - Math.exp(-dt / CARET_SMOOTH_TAU_MS);
+      let moving = false;
+      smoothCarets.forEach((c) => {
+        if (!c.isConnected) { smoothCarets.delete(c); return; }
+        const dx = c._tx - c._cx;
+        if (Math.abs(dx) > 0.2) { c._cx += dx * k; moving = true; } else { c._cx = c._tx; }
+        c.style.transform = `translate(${c._cx}px, ${c._ty}px)`;
+      });
+      caretRaf = moving ? requestAnimationFrame(caretFrame) : null;
+      if (!moving) caretLastTs = 0;
+    }
+
+    function setCaretTarget(caretEl, x, y) {
+      const first = caretEl._cx === undefined;
+      const lineChanged = !first && caretEl._ty !== y;
+      caretEl._tx = x;
+      caretEl._ty = y;
+      if (first || lineChanged) caretEl._cx = x;   // 첫 배치 / 줄 바뀜은 즉시 이동
+      smoothCarets.add(caretEl);
+      caretEl.style.transform = `translate(${caretEl._cx}px, ${caretEl._ty}px)`;
+      if (!caretRaf) { caretLastTs = performance.now(); caretRaf = requestAnimationFrame(caretFrame); }
+    }
+
     function positionCaret(caretEl, charIndex) {
       if (!caretEl) return;
       const spans = document.querySelectorAll('span.char');
       if (spans.length === 0) return;
+      let x, y;
       if (charIndex >= spans.length) {
         const last = spans[spans.length - 1];
-        caretEl.style.transform = `translate(${last.offsetLeft + last.offsetWidth}px, ${last.offsetTop}px)`;
+        x = last.offsetLeft + last.offsetWidth;
+        y = last.offsetTop;
       } else {
         const target = spans[Math.max(0, charIndex)];
         if (!target) return;
-        caretEl.style.transform = `translate(${target.offsetLeft}px, ${target.offsetTop}px)`;
+        x = target.offsetLeft;
+        y = target.offsetTop;
       }
+      setCaretTarget(caretEl, x, y);
       caretEl.style.display = 'block';
     }
 
@@ -1132,10 +1273,7 @@
       if (qd) qd.style.transform = `translateY(-${Math.max(0, row) * LINE_HEIGHT}px)`;
     }
 
-    /* =========================================================
-       11-A) 서버 주도 카운트다운 + 입력창 활성화
-       ========================================================= */
-
+    /* ---------- 11-A) Countdown / enable typing ---------- */
     function focusTypingInput() {
       const ti = el('typingInput');
       if (!ti || ti.disabled) return;
@@ -1181,17 +1319,30 @@
 
       inGame = true;
       typingLocked = false;
-      // ★ "Start!" 문구는 화면 상단에 잠깐 떴다가 1초 뒤 자동으로 사라진다.
+      // ★ [랭킹] 키 간격 기록 시작: 첫 간격 = START 신호 ~ 첫 입력까지의 시간
+      keyDeltas = [];
+      lastKeyAt = performance.now();
+      // 타이머 + Leave 버튼을 먼저 실행 (아래에서 에러가 나도 동작)
+      setDisplay('leaveMatchRow', 'block');
+      setDisplay('liveReportBtn', isPrivateRoomMatch ? 'none' : '');   // 친선(코드 방)은 신고 버튼 숨김
+      startGameTimer();
+
       setMatchAnnounce('Start!', { autoHideMs: 1000 });
+
+      // VS 배너 숨김 (실패해도 게임에 영향 없음)
+      try {
+        const vs = document.getElementById('vsBanner');
+        if (vs) {
+          vs.classList.add('vs-fade');
+          setTimeout(() => { vs.classList.add('vs-gone'); }, 450);
+        }
+      } catch (e) { console.warn('[vsBanner hide]', e); }
 
       forceEnableTyping();
       requestAnimationFrame(focusTypingInput);
       setTimeout(focusTypingInput, 60);
       setTimeout(focusTypingInput, 250);
       setTimeout(focusTypingInput, 400);
-
-      setDisplay('leaveMatchRow', 'block');
-      startGameTimer();
     }
 
     function ensureTypingEnabled() {
@@ -1210,8 +1361,6 @@
 
     function startInputWatchdog() {
       clearInterval(inputWatchdog);
-      // ★ 120ms -> 60ms: 소켓 이벤트로 포커스가 빠졌을 때 복구까지 걸리는 최대 지연을 절반으로 줄인다.
-      //   (근본 수정은 아래 typingInput 'blur' 리스너 — 이건 그걸 보조하는 안전망일 뿐)
       inputWatchdog = setInterval(ensureTypingEnabled, 60);
     }
 
@@ -1233,10 +1382,7 @@
       gameTimerInterval = setInterval(update, 200);
     }
 
-    /* =========================================================
-       11-B) 타이핑 입력 — Practice와 매치가 완전히 동일한 로직을 공유한다.
-       ========================================================= */
-
+    /* ---------- 11-B) Practice ---------- */
     function showPracticeText(text) {
       sampleText = text;
       prevVal = '';
@@ -1244,6 +1390,7 @@
       if (ti) ti.value = '';
       renderQuote();
       if (oppCaretEl) oppCaretEl.style.display = 'none';
+      initPacer();
     }
 
     function renderPracticeScreen(text) {
@@ -1267,6 +1414,7 @@
       if (timerEl && timerEl.parentElement) timerEl.parentElement.style.display = 'none';
       setText('accuracy', 100);
       setDisplay('practiceExitRow', 'block');
+      setDisplay('pacerPanel', 'flex');
 
       showPracticeText(text);
       forceEnableTyping();
@@ -1294,6 +1442,8 @@
 
       practice.active = false;
       practice.origin = null;
+      stopPacer();
+      setDisplay('pacerPanel', 'none');
 
       const ti = el('typingInput');
       if (ti) { ti.value = ''; ti.disabled = true; }
@@ -1307,6 +1457,143 @@
       if (!practice.active) return;
       teardownPractice();
       setDisplay('gameArea', 'none');
+    }
+
+    /* ---- Target WPM 페이스메이커 (연습 모드 전용) ---- */
+    let pacerEl = null;
+    let pacerSpans = null;
+    let pacerRaf = null;
+    let pacerStartAt = null;
+    let pacerBase = 0;
+    let pacerWpm = 50;
+    let pacerEnabled = true;          // Target Line ON/OFF
+    let pacerLastInputAt = 0;         // 마지막 타이핑 시각 (idle 판정용)
+    const PACER_IDLE_MS = 1500;       // 이 시간(ms) 이상 입력이 없으면 선 정지 (1000~2000 사이로 조절 가능)
+    function pacerCps() { return pacerWpm * 5 / 60; }
+
+    function pacerPos() {
+      if (pacerStartAt === null) return pacerBase;
+      return pacerBase + (performance.now() - pacerStartAt) / 1000 * pacerCps();
+    }
+
+    function stopPacer() {
+      if (pacerRaf) { cancelAnimationFrame(pacerRaf); pacerRaf = null; }
+      pacerStartAt = null;
+      pacerBase = 0;
+      if (pacerEl && pacerEl.parentNode) pacerEl.parentNode.removeChild(pacerEl);
+      pacerEl = null;
+      pacerSpans = null;
+      pacerLines = null;
+    }
+
+    let pacerLines = null;
+
+    function buildPacerLines() {
+      pacerLines = [];
+      if (!pacerSpans || pacerSpans.length === 0) return;
+      let cur = null;
+      for (let i = 0; i < pacerSpans.length; i++) {
+        const sp = pacerSpans[i];
+        if (!cur || sp.offsetTop !== cur.y) {
+          cur = { start: i, count: 0, y: sp.offsetTop, x0: sp.offsetLeft, x1: 0 };
+          pacerLines.push(cur);
+        }
+        cur.count++;
+        cur.x1 = sp.offsetLeft + sp.offsetWidth;
+      }
+    }
+
+    function initPacer() {
+      stopPacer();
+      const qd = el('quoteDisplay');
+      if (!qd) return;
+      pacerSpans = qd.querySelectorAll('span.char');
+      pacerEl = document.createElement('div');
+      pacerEl.className = 'pacer-caret';
+      qd.appendChild(pacerEl);
+      buildPacerLines();
+      placePacer(0);
+    }
+
+    // 한 줄 안에서는 화면상 속도가 일정하도록, 글자 폭과 무관하게 줄 시작~끝을 선형으로 이동한다.
+    function placePacer(pos) {
+      if (!pacerEl || !pacerSpans || pacerSpans.length === 0) return;
+      if (!pacerEnabled) { if (pacerEl) pacerEl.style.display = 'none'; return; }
+      if (!pacerLines || pacerLines.length === 0) buildPacerLines();
+      if (!pacerLines.length) return;
+      const n = pacerSpans.length;
+      const p = Math.max(0, Math.min(n, pos));
+      let line = pacerLines[pacerLines.length - 1];
+      for (let k = 0; k < pacerLines.length; k++) {
+        const L = pacerLines[k];
+        if (p < L.start + L.count) { line = L; break; }
+      }
+      const frac = Math.max(0, Math.min(1, (p - line.start) / line.count));
+      const x = line.x0 + (line.x1 - line.x0) * frac;
+      pacerEl.style.transform = `translate(${x}px, ${line.y}px)`;
+      pacerEl.style.display = 'block';
+    }
+
+    function pacerTick() {
+      if (!practice.active || !pacerEnabled || pacerStartAt === null) { pacerRaf = null; return; }
+
+      // 입력이 PACER_IDLE_MS 이상 없으면: 그 시점의 위치에서 선을 고정
+      if (performance.now() - pacerLastInputAt >= PACER_IDLE_MS) {
+        const freezeAt = Math.max(pacerStartAt, pacerLastInputAt + PACER_IDLE_MS);
+        pacerBase = pacerBase + (freezeAt - pacerStartAt) / 1000 * pacerCps();
+        pacerStartAt = null;
+        pacerRaf = null;
+        placePacer(pacerBase);
+        return;
+      }
+
+      const pos = pacerPos();
+      placePacer(pos);
+      if (pacerSpans && pos < pacerSpans.length) pacerRaf = requestAnimationFrame(pacerTick);
+      else pacerRaf = null;
+    }
+
+    // 타이핑이 일어날 때마다 호출됨 (applyTypedValue 안): 입력 시각 갱신 + 멈춰 있던 선 재출발
+    function startPacerIfNeeded() {
+      if (!practice.active || !pacerEl) return;
+      pacerLastInputAt = performance.now();
+      if (!pacerEnabled || pacerStartAt !== null) return;
+      pacerStartAt = performance.now();          // pacerBase(멈춘 위치)부터 다시 이동
+      pacerRaf = requestAnimationFrame(pacerTick);
+    }
+
+    function togglePacer() {
+      pacerEnabled = !pacerEnabled;
+
+      const btn = el('pacerToggleBtn');
+      if (btn) {
+        btn.innerText = 'Target Line: ' + (pacerEnabled ? 'ON' : 'OFF');
+        btn.classList.toggle('off', !pacerEnabled);
+      }
+      const sl = el('pacerSlider');
+      if (sl) { sl.disabled = !pacerEnabled; sl.style.opacity = pacerEnabled ? '1' : '0.35'; }
+      const pv = el('pacerValue');
+      if (pv) pv.style.opacity = pacerEnabled ? '1' : '0.35';
+
+      if (pacerRaf) { cancelAnimationFrame(pacerRaf); pacerRaf = null; }
+      pacerStartAt = null;
+
+      if (!pacerEnabled) {
+        if (pacerEl) pacerEl.style.display = 'none';   // 선 완전히 숨김
+      } else {
+        pacerBase = prevVal.length;                    // 켤 때는 내 현재 위치에서 시작
+        placePacer(pacerBase);                         // 다음 키 입력부터 이동 시작
+      }
+    }
+
+    function onPacerSlider(v) {
+      const w = Math.max(20, Math.min(150, Math.round(Number(v) / 5) * 5));
+      if (pacerStartAt !== null) {
+        pacerBase = pacerPos();
+        pacerStartAt = performance.now();
+      }
+      pacerWpm = w;
+      setText('pacerValue', w + ' WPM');
     }
 
     function exitPractice() {
@@ -1331,8 +1618,7 @@
       }
     }
 
-    /* ---------- 12) 타이핑 입력 처리 (Practice + 매치 공용) ---------- */
-
+    /* ---------- 12) Typing input ---------- */
     function paintTypedChars(value) {
       const qd = el('quoteDisplay');
       if (!qd) return;
@@ -1341,6 +1627,15 @@
         if (i < value.length) span.className = 'char ' + (value[i] === sampleText[i] ? 'correct' : 'incorrect');
         else span.className = 'char';
       });
+    }
+
+    function countCurrentCorrectChars(typed, text) {
+      const limit = Math.min(typed.length, text.length);
+      let correct = 0;
+      for (let i = 0; i < limit; i++) {
+        if (typed[i] === text[i]) correct++;
+      }
+      return correct;
     }
 
     function computeAccuracy() {
@@ -1377,9 +1672,6 @@
       return true;
     }
 
-    // ★★★ [v8] 모든 문자 입력의 "단일 관문".
-    //   keydown / input 폴백 / compositionend 어느 경로로 들어오든 반드시 이 함수를 거친다.
-    //   Space(' ')는 일반 글자처럼 버퍼에 이어 붙이지 않고 handleSpace()에서만 처리한다.
     function typeChar(ch) {
       if (!canAcceptTyping()) return;
       if (prevVal.length >= sampleText.length) return;
@@ -1387,48 +1679,48 @@
       applyTypedValue(prevVal + ch);
     }
 
-    // ★★★ [v8] Space = "현재 단어 완료 → 다음 단어로 이동" 전용 처리.
-    //   - 다음 입력 위치(p)가 속한 단어의 시작 인덱스를 sampleText에서 직접 계산한다. (별도 상태값 없음 → Backspace와도 항상 일치)
-    //   - 현재 단어를 한 글자도 안 쳤으면(p === wordStart) Space 무시
-    //       → 연속 Space, 키 반복, 중복 이벤트가 와도 다음 단어 첫 글자 자리에 공백이 들어갈 수 없다.
-    //   - 단어가 끝난 위치(sampleText[p] === ' ')가 아니면 Space 무시 (단어 중간 Space가 오답 글자로 찍히지 않음)
-    //   - 위 조건을 통과한 Space만 "단어 사이 공백"으로 정확히 1글자 수락하고 커서를 다음 단어 첫 글자로 이동시킨다.
     function handleSpace() {
       const ti = el('typingInput');
-      if (ti) ti.value = ''; // 숨은 입력창 버퍼는 항상 비워서 공백이 남지 않게 한다
+      if (ti) ti.value = '';
 
       const p = prevVal.length;
       const wordStart = p === 0 ? 0 : sampleText.lastIndexOf(' ', p - 1) + 1;
-      if (p === wordStart) return;          // 현재 단어를 아직 시작하지 않음
-      if (sampleText[p] !== ' ') return;    // 단어가 아직 끝나지 않았음
+      if (p === wordStart) return;
+      if (sampleText[p] !== ' ') return;
       applyTypedValue(prevVal + ' ');
     }
 
-    // ★★★ [버그 수정 - 스페이스 이중 입력]
-    //   같은 keydown 이벤트가 두 경로(input 직접 리스너 / document 포커스 복구 리스너)로
-    //   중복 처리되지 않도록 이벤트 객체에 처리 완료 마킹을 남긴다.
+    function isBackspaceEvent(e) {
+      return e.key === 'Backspace' || e.code === 'Backspace';
+    }
+
+    function handleBackspace() {
+      const ti = el('typingInput');
+      if (ti) ti.value = '';
+      if (prevVal.length > 0) applyTypedValue(prevVal.slice(0, -1));
+    }
+
     function onTypingKeyDown(e) {
       if (e.__typingHandled) return;
       e.__typingHandled = true;
 
       if (e.code && e.code !== 'Unidentified') physicalKeyboardSeen = true;
 
-      // Space는 어떤 경우에도 브라우저 기본 동작(입력창에 공백 삽입 / 페이지 스크롤)을 막는다.
+      if (isBackspaceEvent(e)) {
+        e.preventDefault();
+        if (!canAcceptTyping()) return;
+        if (e.ctrlKey || e.metaKey || e.altKey) return;
+        handleBackspace();
+        return;
+      }
+
       if (e.code === 'Space' || e.key === ' ') e.preventDefault();
 
-      // 키 반복(e.repeat)은 실제 타이핑으로 인정하지 않는다.
       if (e.repeat) { e.preventDefault(); return; }
 
       if (!canAcceptTyping()) return;
-      if (e.ctrlKey || e.metaKey || e.altKey) {
-        if (e.key === 'Backspace') e.preventDefault();
-        return;
-      }
-      if (e.key === 'Backspace') {
-        e.preventDefault();
-        if (prevVal.length > 0) applyTypedValue(prevVal.slice(0, -1));
-        return;
-      }
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
+
       const ch = keyEventToChar(e);
       if (ch === null) return;
       e.preventDefault();
@@ -1446,7 +1738,7 @@
     function onTypingFallbackInput(e) {
       const ti = e.target;
       if (!ti) return;
-      if (physicalKeyboardSeen || e.isComposing) { if (!e.isComposing) ti.value = ''; return; }
+      if (physicalKeyboardSeen || e.isComposing) { ti.value = ''; return; }
       if (canAcceptTyping()) {
         const type = e.inputType || '';
         if (type === 'deleteContentBackward') {
@@ -1473,12 +1765,17 @@
 
       const prev = prevVal;
 
-      // ★ [v8] 최종 방어선: 새로 추가되는 글자 중 "공백이 들어갈 자리가 아닌 곳"의 공백은 무조건 거부한다.
-      //   (어떤 경로에서 잘못 호출되더라도 공백이 다음 단어 글자와 비교되어 오답 처리되는 일이 없다)
       for (let i = prev.length; i < value.length; i++) {
         if (value[i] === ' ' && sampleText[i] !== ' ') { ti.value = ''; return; }
       }
-
+      // ★ [랭킹] 키 입력 간격(ms) 기록: 대전 중에만 (연습 모드/카운트다운 제외). 백스페이스 포함.
+      if (!practice.active && inGame && lastKeyAt !== null) {
+        const nowTs = performance.now();
+        if (keyDeltas.length < 5000) {
+          keyDeltas.push(Math.min(9999, Math.max(0, Math.round(nowTs - lastKeyAt))));
+        }
+        lastKeyAt = nowTs;
+      }
       for (let i = prev.length; i < value.length; i++) {
         totalTyped++;
         if (value[i] !== sampleText[i]) totalErrors++;
@@ -1490,13 +1787,15 @@
       positionCaret(myCaretEl, value.length);
       updateViewportScroll(Math.max(0, getRowForIndex(value.length) - 1));
       updateAccuracyDisplay();
+      if (practice.active) startPacerIfNeeded();
 
       if (!practice.active) {
         emit('progress', {
+          typed: value,
           charIndex: value.length,
+          netCorrect: countCurrentCorrectChars(value, sampleText),
           totalTyped,
           totalErrors,
-          netCorrect: Math.max(0, totalTyped - totalErrors),
           accuracy: computeAccuracy()
         });
         myCharIndex = value.length;
@@ -1515,6 +1814,9 @@
     }
 
     function initTypingInput() {
+      on('typingInput', 'compositionstart',  () => { const t = el('typingInput'); if (t) t.value = ''; });
+      on('typingInput', 'compositionupdate', () => { const t = el('typingInput'); if (t) t.value = ''; });
+
       const area = el('typeArea');
       if (area) {
         ['paste', 'drop', 'cut'].forEach((evt) => {
@@ -1528,8 +1830,6 @@
       on('typingInput', 'input', onTypingFallbackInput);
       on('typingInput', 'compositionend', onTypingCompositionEnd);
 
-      // ★ [포커스 씹힘 수정] input이 blur되는 "그 순간" 바로 재포커스를 시도해서 입력 유실 구간을 없앤다.
-      //   (모달이 열려 있거나 사용자가 다른 입력창/버튼을 의도적으로 클릭한 경우는 제외)
       on('typingInput', 'blur', () => {
         if (gameEnded || typingLocked) return;
         if (!(inGame || practice.active)) return;
@@ -1539,7 +1839,7 @@
         if (roomModal && roomModal.classList.contains('show')) return;
         const ae = document.activeElement;
         if (ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA' || ae.tagName === 'BUTTON' || ae.tagName === 'A') && ae !== el('typingInput')) {
-          return; // 사용자가 의도적으로 다른 입력요소/버튼을 클릭한 경우엔 뺏어오지 않는다
+          return;
         }
         setTimeout(focusTypingInput, 0);
       });
@@ -1558,8 +1858,6 @@
         focusTypingInput();
       });
 
-      // ★ 포커스 자동 복구 경로 — key-repeat는 무시하고,
-      //   onTypingKeyDown 자체의 중복 마킹(__typingHandled)이 엘리먼트 직접 경로와의 중복 실행을 막는다.
       document.addEventListener('keydown', (e) => {
         if (!(inGame || practice.active) || gameEnded || typingLocked) return;
         if (e.repeat) return;
@@ -1584,8 +1882,7 @@
       });
     }
 
-    /* ---------- 13) 대전 시작 ---------- */
-
+    /* ---------- 13) Match start ---------- */
     function setGaugeVisible(visible) {
       toggleCls('momentumGauge', 'hidden-state', !visible);
     }
@@ -1645,6 +1942,49 @@
       addCls('matchAnnounce', 'hidden-state');
     }
 
+    /* ---- VS banner ---- */
+    function firstFinite() {
+      for (const v of arguments) { if (Number.isFinite(v)) return v; }
+      return undefined;
+    }
+
+    function rememberOpp(d) {
+      if (!d) return;
+      const o = d.opponent || d.opp || {};
+      const name = d.opponentName || o.name || d.oppName;
+      const avatar = d.opponentAvatar || o.avatar || d.oppAvatar;
+      const streak = firstFinite(
+        d.opponentStreak, d.oppStreak, d.opponentWinStreak, d.enemyStreak,
+        o.streak, o.winStreak
+      );
+      if (name) pendingOppInfo.name = name;
+      if (avatar) pendingOppInfo.avatar = avatar;
+      if (streak !== undefined) pendingOppInfo.streak = streak;
+    }
+
+    function streakLabel(n) { return (Number.isFinite(n) && n >= 3) ? `🔥 ${n}연승` : ''; }
+
+    function renderVsBanner() {
+      try {
+        const opp = pendingOppInfo || {};
+        setText('vsMeAvatar', myAvatar || '😀');
+        setText('vsMeName', myName || 'You');
+        setText('vsMeStreak', isRanked ? streakLabel(myStreak) : '');
+        setText('vsOppAvatar', opp.avatar || '👤');
+        setText('vsOppName', opp.name || 'Opponent');
+        setText('vsOppStreak', isRanked ? streakLabel(opp.streak) : '');
+        const vs = document.getElementById('vsBanner');
+        if (vs) {
+          vs.classList.remove('vs-fade');
+          vs.classList.remove('vs-gone');
+          vs.style.display = 'flex';
+        }
+      } catch (e) {
+        console.warn('[renderVsBanner]', e);
+      }
+      pendingOppInfo = {};
+    }
+
     sub('gameStart', (data) => {
       if (!data) return;
       const early = pendingTick;
@@ -1653,9 +1993,14 @@
       currentMode = data.mode;
       currentDuration = data.duration;
       sampleText = data.text;
+      currentRoomId = data.roomId || null;
       duration = data.duration;
       isRanked = !!data.isRanked;
-
+      setStreakHud(data.myStreak);
+      if (data.myName) myName = data.myName;
+      if (data.myAvatar) myAvatar = data.myAvatar;
+      rememberOpp(data);
+      renderVsBanner();
       matchActive = true;
       inGame = false;
       typingLocked = false;
@@ -1673,8 +2018,8 @@
       removeCls('roomCodeModal', 'show');
       setLobbyVisible(false);
 
-      setText('modeBadge', `${data.isRanked ? '[Ranked] ' : '[Casual] '}${duration}s`);
-      // ★ "Opponent found!"도 Start!와 마찬가지로 1초 후 자동으로 사라진다.
+      isFriendlyMatchNow = data.isFriendly === true;
+      setText('modeBadge', `${data.isRanked ? '[Ranked] ' : (isFriendlyMatchNow ? '[친선] ' : '[Casual] ')}${duration}s`);
       setMatchAnnounce('Opponent found!', { autoHideMs: 1000 });
       setHTML('resultBanner', '');
       setClassName('resultBanner', 'result-banner');
@@ -1696,11 +2041,10 @@
       if (oppCaretEl) positionCaret(oppCaretEl, idx);
       oppCharIndex = idx;
       updateMomentumGauge();
-      // ★ 소켓 데이터 수신으로 인한 포커스 이탈에 대한 추가 안전망 (저비용, idempotent)
       ensureTypingEnabled();
     });
 
-    /* ---------- 14) 재경기 ---------- */
+    /* ---------- 14) Rematch ---------- */
     function clearRematchState() {
       clearInterval(rematchCountdownInterval);
       rematchCountdownInterval = null;
@@ -1787,17 +2131,20 @@
       setPostMatchButtons();
     });
 
-    /* ---------- 15) 신고 ---------- */
+    /* ---------- 15) Report ---------- */
     function openReportModal() {
-      selectedReportReason = null;
-      document.querySelectorAll('.report-option').forEach((o) => o.classList.remove('selected'));
-      document.querySelectorAll('input[name="reportReason"]').forEach((r) => { r.checked = false; });
       const submitBtn = document.querySelector('.report-modal-box .btn-save');
-      if (submitBtn) { submitBtn.disabled = false; submitBtn.innerText = 'Submit Report'; }
+      if (submitBtn) { submitBtn.disabled = false; submitBtn.innerText = '신고하기'; }
       addCls('reportModalOverlay', 'show');
     }
-
-    function closeReportModal() { removeCls('reportModalOverlay', 'show'); }
+    function closeReportModal() {
+      removeCls('reportModalOverlay', 'show');
+      if ((inGame || practice.active) && !gameEnded && !typingLocked) {
+        const ae = document.activeElement;
+        if (ae && ae.blur) ae.blur();
+        focusTypingInput();
+      }
+    }
 
     function selectReportReason(reason, elm) {
       selectedReportReason = reason;
@@ -1806,51 +2153,120 @@
     }
 
     function submitReport() {
-      if (!selectedReportReason) { setStatus('⚠️ Please select a reason.'); return; }
-      if (!lastOpponentId || !lastRoomId) { setStatus('⚠️ No opponent data available.'); closeReportModal(); return; }
-      if (reportedMatchIds.has(lastRoomId)) { setStatus('⚠️ You already reported in this match.'); closeReportModal(); return; }
+      // 경기 중이면 현재 경기의 roomId, 종료 후에는 마지막 경기의 roomId를 보낸다.
+      // 신고 대상(상대 ID)은 서버가 그 경기의 참가자 기록에서 직접 찾으므로 보내지 않는다.
+      const midMatch = (matchActive || inGame) && !gameEnded && !practice.active;
+      const roomId = midMatch ? (currentRoomId || null) : lastRoomId;
+
+      if (!midMatch && !roomId) { showToast('⚠️ 신고할 경기 정보가 없습니다.', 'warn'); closeReportModal(); return; }
+      if (roomId && reportedMatchIds.has(roomId)) { showToast('⚠️ 이 경기는 이미 신고했습니다.', 'warn'); closeReportModal(); return; }
+
       const submitBtn = document.querySelector('.report-modal-box .btn-save');
-      if (submitBtn) { submitBtn.disabled = true; submitBtn.innerText = 'Submitting...'; }
-      emit('report_player', {
-        targetPlayerId: lastOpponentId,
-        roomId: lastRoomId,
-        reason: selectedReportReason,
-        matchStats: lastMatchStats || {}
-      });
-      reportedMatchIds.add(lastRoomId);
+      if (submitBtn) { submitBtn.disabled = true; submitBtn.innerText = '전송 중...'; }
+      emit('reportMatch', { roomId, reason: 'cheating' });
+      clearTimeout(reportTimeoutId);
+      reportTimeoutId = setTimeout(() => {
+        const btn = document.querySelector('.report-modal-box .btn-save');
+        if (btn && btn.disabled) { btn.disabled = false; btn.innerText = '신고하기'; }
+        closeReportModal();
+        showToast('⚠️ 서버 응답이 없습니다. 서버가 최신 버전(friendly-v20)으로 재시작되었는지 확인해주세요.', 'error');
+      }, 5000);
     }
 
     sub('reportResult', (data) => {
+      clearTimeout(reportTimeoutId);
       closeReportModal();
       const submitBtn = document.querySelector('.report-modal-box .btn-save');
-      if (submitBtn) { submitBtn.disabled = false; submitBtn.innerText = 'Submit Report'; }
+      if (submitBtn) { submitBtn.disabled = false; submitBtn.innerText = '신고하기'; }
+
       if (data && data.success) {
-        setStatus('✅ Report submitted. Thank you!');
+        if (data.roomId) reportedMatchIds.add(data.roomId);
+        showToast('✅ 신고가 접수되었습니다.', 'success');
         const reportBtn = el('reportBtn');
-        if (reportBtn) { reportBtn.disabled = true; reportBtn.innerText = 'Reported'; }
+        if (reportBtn && data.roomId === lastRoomId) { reportBtn.disabled = true; reportBtn.innerText = 'Reported'; }
       } else {
-        setStatus('⚠️ ' + ((data && data.message) || 'Report failed.'));
+        if (data && data.code === 'ALREADY_REPORTED' && data.roomId) reportedMatchIds.add(data.roomId);
+        showToast('⚠️ ' + ((data && data.message) || '신고에 실패했습니다.'), 'warn');
       }
     });
 
-    on('reportModalOverlay', 'click', (e) => {
-      if (e.target && e.target.id === 'reportModalOverlay') closeReportModal();
-    });
+    /* ---------- 15-B) Streak (simple) ---------- */
+    const STREAK_BONUS_TXT = (b) => (Number.isFinite(b) ? ` (+${b} Bonus MMR)` : '');
+    const STREAK_TIERS = [
+      { min: 10, tier: 3, text: (n, b) => `🔥 🔥 🔥 ${n} STREAK${STREAK_BONUS_TXT(b)}`, hud: (n) => `🔥 ${n}연승` },
+      { min: 5,  tier: 2, text: (n, b) => `🔥 🔥 ${n} STREAK${STREAK_BONUS_TXT(b)}`,    hud: (n) => `🔥 ${n}연승` },
+      { min: 3,  tier: 1, text: (n, b) => `🔥 ${n} STREAK${STREAK_BONUS_TXT(b)}`,       hud: (n) => `🔥 ${n}연승` }
+    ];
 
-    /* ---------- 16) 게임 종료 ---------- */
+    function getStreakTier(streak) {
+      return STREAK_TIERS.find((t) => Number.isFinite(streak) && streak >= t.min) || null;
+    }
+
+    function buildStreakBannerHtml(data) {
+      if (!data || data.result !== 'win' || !data.mmrApplied || data.invalidated) return '';
+      const info = getStreakTier(data.streak);
+      if (!info) return '';
+      return `<div class="streak-banner tier${info.tier}" id="streakBanner">${info.text(data.streak, data.streakBonus)}</div>`;
+    }
+
+    function setStreakHud(streak) {
+      myStreak = Number.isFinite(streak) ? streak : 0;
+      const info = isRanked ? getStreakTier(myStreak) : null;
+      document.querySelectorAll('.streak-hud').forEach((node) => {
+        node.classList.remove('show', 'tier1', 'tier2', 'tier3');
+        if (!info) { node.textContent = ''; return; }
+        node.textContent = info.hud(myStreak);
+        node.classList.add('show', 'tier' + info.tier);
+      });
+    }
+
+    function clearStreakEffects() { /* 연출 제거됨 (호환용 빈 함수) */ }
+
+    function playStreakEffects(data) {
+      setStreakHud(data && data.streak);
+    }
+    /* ---------- 15-C) 랭킹 등록 (WPM 기록) ---------- */
+    // WPM은 서버가 직접 계산하므로 roomId + 키 간격 배열만 보낸다.
+    // 친선/부정행위/기권으로 끝난 판은 서버가 NO_PENDING 으로 응답하며, 그땐 아무것도 표시하지 않는다.
+    function submitRankIfEligible(data) {
+      if (!data || !data.roomId) return;
+      if (isPrivateRoomMatch || data.invalidated || data.reason || data.disqualified) return;
+      if (!Array.isArray(keyDeltas) || keyDeltas.length === 0) return;
+      setText('rankSubmitStatus', '⏳ 랭킹 기록 등록 중...');
+      emit('submitRank', { roomId: data.roomId, deltas: keyDeltas.slice() });
+    }
+
+    sub('rankSubmitResult', (data) => {
+      const node = el('rankSubmitStatus');
+      if (!node || !data) return;
+      if (data.code === 'NO_PENDING') { node.innerText = ''; return; }
+      if (data.success) {
+        node.style.color = '#4caf50';
+        node.innerText = data.isNewBest
+          ? `🏅 새 최고 기록! ${data.duration}초 ${data.wpm} WPM`
+          : '';
+      } else {
+        node.style.color = '#ca4754';
+        node.innerText = '⚠️ 랭킹 등록 거부: ' + (data.message || '');
+      }
+    });
+    /* ---------- 16) Game over ---------- */
     function renderCompareCard(label, colClass, stats) {
       const s = stats || { netCorrect: 0, accuracy: 0 };
+      const net = Number.isFinite(s.netCorrect) ? s.netCorrect : 0;
+      const secs = Number(duration) > 0 ? Number(duration) : 0;
+      const wpm = secs > 0 ? Math.round((net / 5) / (secs / 60)) : 0;
       return `<div class="dash-col ${colClass}">`
         + `<h4>${label}</h4>`
-        + `<div class="dash-stat-row"><span class="k">Net Chars</span><span class="v">${s.netCorrect}</span></div>`
+        + `<div class="dash-stat-row"><span class="k">Net Chars</span><span class="v">${net}</span></div>`
+        + `<div class="dash-stat-row"><span class="k">WPM</span><span class="v">${wpm}</span></div>`
         + `<div class="dash-stat-row"><span class="k">Accuracy</span><span class="v">${s.accuracy}%</span></div>`
         + `</div>`;
     }
 
-    // ★ [v8] 트로피/MMR 변동 표시 — Ranked / Casual 구분 없이 서버가 보낸 값을 그대로 표시한다.
-    //   - 트로피: 항상 표시 ("+10 🏆 Trophies (Total 42)" / "-3 🏆 Trophies (Total 39)" / "+0 🏆 Trophies")
-    //   - MMR: ratingData가 있을 때만 표시 (기본 설정에서는 Ranked 전용)
     function buildChangeHtml(data) {
+      // ★ 친선: 트로피/MMR 변동 표시 없음 (내 트로피 값도 건드리지 않는다)
+      if (data.isFriendly === true || isFriendlyMatchNow) return '';
       const td = data.trophyData || {};
       const trophyDiff = Number.isFinite(td.diff) ? td.diff
         : (Number.isFinite(data.trophyChange) ? data.trophyChange : 0);
@@ -1867,7 +2283,7 @@
         ? `<div class="rating-change">${data.ratingData.diff >= 0 ? '+' : ''}${data.ratingData.diff} MMR (${data.ratingData.old} → ${data.ratingData.new})</div>`
         : '';
 
-      return mmrHtml + trophyHtml;
+            return data.isRanked ? mmrHtml : (mmrHtml + trophyHtml);
     }
 
     sub('gameOver', (data) => {
@@ -1883,7 +2299,7 @@
 
       const tiEnd = el('typingInput');
       if (tiEnd) tiEnd.disabled = true;
-
+      setDisplay('leaveMatchRow', 'none');   // 경기 종료 → Leave Match / 경기 중 신고 버튼 숨김
       if (data.opponentId) lastOpponentId = data.opponentId;
       if (data.roomId) lastRoomId = data.roomId;
       if (data.myStats) lastMatchStats = data.myStats;
@@ -1891,7 +2307,8 @@
       applyUnlockStatus(data.unlock, { justUnlocked: !!data.justUnlocked, unlockedNow: !!data.unlockedNow });
 
       const myStats = data.myStats || {};
-      const tagClass = data.result === 'win' ? 'win' : (data.result === 'lose' ? 'lose' : 'draw');
+      const isFriendlyResult = data.isFriendly === true || isFriendlyMatchNow;
+      let tagClass = data.result === 'win' ? 'win' : (data.result === 'lose' ? 'lose' : 'draw');
       let tagText = data.result === 'win' ? '🏆 WIN' : (data.result === 'lose' ? '💀 LOSE' : '🤝 DRAW');
       if (data.reason === 'forfeit') {
         tagText = data.result === 'lose' ? '💀 LOSE (Forfeited)' : '🏆 WIN (Opponent Forfeited)';
@@ -1899,12 +2316,20 @@
         tagText = data.disqualified ? '🚫 DISQUALIFIED (Cheat Detected)' : '🏆 WIN (Opponent Disqualified)';
       }
 
+      // ★ 친선: 승패/점수 표현 없이 "연습 결과"로만 표시 (WPM, 정확도는 아래 비교 카드에 그대로 표시됨)
+      if (isFriendlyResult) {
+        tagClass = 'draw';
+        tagText = data.reason === 'forfeit' ? '🎯 친선전 종료 (상대 퇴장)' : '🎯 친선전 — 연습 결과';
+      }
+
       const changeHtml = buildChangeHtml(data);
       updateTopBar();
 
       const alreadyReported = reportedMatchIds.has(lastRoomId || '');
       const oppName = data.opponentName || 'Opponent';
-      const reportBtnHtml = `<button class="btn-report" id="reportBtn" onclick="openReportModal()" ${alreadyReported ? 'disabled' : ''}>${alreadyReported ? 'Reported' : '⚠ Report'}</button>`;
+      const reportBtnHtml = isPrivateRoomMatch
+        ? ''
+        : `<button class="btn-report" id="reportBtn" onclick="openReportModal()" ${alreadyReported ? 'disabled' : ''}>${alreadyReported ? 'Reported' : '⚠ Report'}</button>`;
       const invalidatedNote = data.invalidated
         ? `<div class="rating-change" style="color:#888;">⚖️ Practice match — rewards not counted (same account detected)</div>`
         : '';
@@ -1912,12 +2337,14 @@
       setHTML('resultBanner', `
         <div class="dash-result-tag ${tagClass}">${tagText}</div>
         ${invalidatedNote}
+        ${buildStreakBannerHtml(data)}
         <div class="opp-name-row">
           <span class="opp-label">vs</span>
           <span class="opp-name">${oppName}</span>
           ${reportBtnHtml}
         </div>
         ${changeHtml}
+        <div id="rankSubmitStatus" style="font-size:0.9rem; font-weight:bold; margin-top:6px; min-height:1.2em; color:#aaa;"></div>
         <div class="dash-main">
           <div class="dash-primary">
             <div class="dash-value">${myStats.netCorrect || 0}</div>
@@ -1930,7 +2357,9 @@
         </div>
       `);
       setClassName('resultBanner', 'result-banner dashboard show');
-
+      playStreakEffects(data);
+      // ★ [랭킹] 이번 판 기록을 랭킹에 등록 요청
+      submitRankIfEligible(data);
       setLobbyVisible(true);
       setPostMatchButtons();
     });
@@ -1954,7 +2383,7 @@
       setPostMatchButtons();
     });
 
-    /* ---------- 17) inline onclick용 전역 노출 (스코프 이슈 방지) ---------- */
+    /* ---------- 17) Globals for inline onclick ---------- */
     window.switchView = switchView;
     window.switchMatchKind = switchMatchKind;
     window.selectMode = selectMode;
@@ -1978,8 +2407,9 @@
     window.closeReportModal = closeReportModal;
     window.selectReportReason = selectReportReason;
     window.submitReport = submitReport;
-
-    /* ---------- 18) 초기화 ---------- */
+    window.onPacerSlider = onPacerSlider;
+    window.togglePacer = togglePacer;
+    /* ---------- 18) Init ---------- */
     updateTopBar();
     hideQueueControls();
     initTypingInput();
