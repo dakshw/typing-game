@@ -219,6 +219,14 @@
     .vs-side.opp .vs-name { color:#2196f3; }
     .vs-streak { font-size:.75rem; color:#ffb347; min-height:1em; }
     .vs-mid { font-size:.8rem; color:#666; font-weight:bold; }
+    .vs-rank { display:none; align-self:flex-start; margin-bottom:3px; padding:3px 12px; font-size:1rem; font-weight:800; letter-spacing:.5px; border-radius:999px; border:2px solid; white-space:nowrap; }
+    .vs-side.opp .vs-rank { align-self:flex-end; }
+    .vs-rank.show { display:inline-block; animation: rankPulse 1.1s ease-in-out infinite; }
+    .vs-rank.r1 { color:#ffd700; border-color:#ffd700; background:rgba(255,215,0,.15); box-shadow:0 0 14px rgba(255,215,0,.8); }
+    .vs-rank.r2 { color:#e6e6e6; border-color:#e6e6e6; background:rgba(230,230,230,.12); box-shadow:0 0 12px rgba(230,230,230,.65); }
+    .vs-rank.r3 { color:#e08a45; border-color:#e08a45; background:rgba(205,127,50,.15); box-shadow:0 0 12px rgba(205,127,50,.7); }
+    @keyframes rankPulse { 0%,100% { transform: scale(1); } 50% { transform: scale(1.1); } }
+    .vs-banner.has-top-rank { max-height: 120px; }
     .vs-banner.vs-fade { opacity: 0 !important; max-height: 0 !important; margin: 0 !important; padding-top: 0 !important; padding-bottom: 0 !important; border-width: 0 !important; pointer-events: none !important; }
     .vs-banner.vs-gone { display: none !important; }
     .pacer-caret { position: absolute; top: 3px; left: 0; width: 0; height: 32px; border-left: 2px dashed rgba(255,255,255,.55); background: rgba(255,255,255,.06); pointer-events: none; display: none; }
@@ -368,12 +376,12 @@
       <div class="vs-banner" id="vsBanner" style="display:none;">
         <div class="vs-side me">
           <span class="vs-avatar"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-6 8-6s8 2 8 6z"/></svg></span>
-          <div class="vs-info"><span class="vs-name" id="vsMeName">You</span><span class="vs-streak" id="vsMeStreak"></span></div>
+          <div class="vs-info"><span class="vs-rank" id="vsMeRank"></span><span class="vs-name" id="vsMeName">You</span><span class="vs-streak" id="vsMeStreak"></span></div>
         </div>
         <div class="vs-mid">VS</div>
         <div class="vs-side opp">
           <span class="vs-avatar"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-6 8-6s8 2 8 6z"/></svg></span>
-          <div class="vs-info"><span class="vs-name" id="vsOppName">Opponent</span><span class="vs-streak" id="vsOppStreak"></span></div>
+          <div class="vs-info"><span class="vs-rank" id="vsOppRank"></span><span class="vs-name" id="vsOppName">Opponent</span><span class="vs-streak" id="vsOppStreak"></span></div>
         </div>
       </div>
 
@@ -623,7 +631,7 @@
     let currentLeaderboardTab = 'rank';
 
     let pendingOppInfo = {};
-
+    let myMatchRank = null;   // 이번 경기 시작 시점의 내 전역 순위 (100위 밖이면 null)s
     // ★ [랭킹] 대전 중 키 입력 간격(ms) 기록용
     let keyDeltas = [];
     let lastKeyAt = null;
@@ -1960,23 +1968,48 @@
       if (name) pendingOppInfo.name = name;
       if (avatar) pendingOppInfo.avatar = avatar;
       if (streak !== undefined) pendingOppInfo.streak = streak;
+      if (Number.isFinite(d.opponentRank)) pendingOppInfo.rank = d.opponentRank;
     }
 
     function streakLabel(n) { return (Number.isFinite(n) && n >= 3) ? `🔥 ${n}연승` : ''; }
+
+    function setVsRank(id, rank) {
+      const n = el(id);
+      if (!n) return false;
+      n.classList.remove('show', 'r1', 'r2', 'r3');
+      if (Number.isFinite(rank) && rank >= 1 && rank <= 3) {
+        n.textContent = ['🥇 1위', '🥈 2위', '🥉 3위'][rank - 1];
+        n.classList.add('show', 'r' + rank);
+        return true;
+      }
+      n.textContent = '';
+      return false;
+    }
+
+    // 1~3위는 배지가 따로 있으므로 이름 뒤의 [#순위] 태그는 중복이라 떼어낸다.
+    function vsDisplayName(name, rank, fallback) {
+      const base = name || fallback;
+      return (Number.isFinite(rank) && rank >= 1 && rank <= 3)
+        ? base.replace(/\s*\[#\d+\]\s*$/, '')
+        : base;
+    }
 
     function renderVsBanner() {
       try {
         const opp = pendingOppInfo || {};
         setText('vsMeAvatar', myAvatar || '😀');
-        setText('vsMeName', myName || 'You');
+        setText('vsMeName', vsDisplayName(myName, myMatchRank, 'You'));
         setText('vsMeStreak', isRanked ? streakLabel(myStreak) : '');
         setText('vsOppAvatar', opp.avatar || '👤');
-        setText('vsOppName', opp.name || 'Opponent');
+        setText('vsOppName', vsDisplayName(opp.name, opp.rank, 'Opponent'));
         setText('vsOppStreak', isRanked ? streakLabel(opp.streak) : '');
+        const meTop = setVsRank('vsMeRank', myMatchRank);
+        const oppTop = setVsRank('vsOppRank', opp.rank);
         const vs = document.getElementById('vsBanner');
         if (vs) {
           vs.classList.remove('vs-fade');
           vs.classList.remove('vs-gone');
+          vs.classList.toggle('has-top-rank', meTop || oppTop);
           vs.style.display = 'flex';
         }
       } catch (e) {
@@ -1999,6 +2032,7 @@
       setStreakHud(data.myStreak);
       if (data.myName) myName = data.myName;
       if (data.myAvatar) myAvatar = data.myAvatar;
+      myMatchRank = Number.isFinite(data.myRank) ? data.myRank : null;
       rememberOpp(data);
       renderVsBanner();
       matchActive = true;
