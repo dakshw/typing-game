@@ -161,7 +161,9 @@
     .lb-row.me .lb-name { color: var(--mt-yellow); font-weight: bold; }
     .lb-score { font-weight: bold; color: #fff; margin-left: 8px; min-width: 50px; text-align: right; }
     .lb-empty { text-align: center; padding: 20px; color: #555; font-size: 0.85rem; }
-
+    .lb-list { position: relative; }
+    .lb-me-summary { position: sticky; top: 0; z-index: 2; padding: 12px 16px; font-size: 1rem; color: #ddd; background: #262210; border-bottom: 2px solid var(--mt-yellow); text-align: center; }
+    .lb-me-summary strong { color: var(--mt-yellow); font-size: 1.15rem; }
     .btn-report { background: transparent; border: 1px solid #555; color: #888; font-size: 0.72rem; padding: 3px 8px; border-radius: 4px; cursor: pointer; margin-left: 8px; vertical-align: middle; transition: all 0.15s; }
     .btn-report:hover { border-color: #ca4754; color: #ca4754; }
     .btn-report:disabled { opacity: 0.4; cursor: not-allowed; }
@@ -628,6 +630,7 @@
     let rematchRequestedByMe = false;
 
     let currentView = 'play';
+    let resultScreenActive = false;   // 경기 결과 화면이 떠 있는 상태 (탭으로 결과/순위표를 오갈 때 사용)
     let currentLeaderboardTab = 'rank';
 
     let pendingOppInfo = {};
@@ -691,6 +694,8 @@
       setDisplay('typeTab', 'flex');
       setDisplay('mainModeButtons', 'flex');
       setLobbyVisible(true);
+      resultScreenActive = false;
+      switchView('play');
       setTitle('Select Match Duration');
     }
 
@@ -861,6 +866,10 @@
       toggleCls('rankView', 'active', view === 'rank');
       toggleCls('trophyView', 'active', view === 'trophy');
       toggleCls('wpmView', 'active', view === 'wpm');
+      if (resultScreenActive) {
+        removeCls('playView', 'active');                          // "Select Match Duration" 화면은 숨김
+        setDisplay('gameArea', view === 'play' ? 'block' : 'none'); // Play 탭 = 결과 화면, Rank/Trophy 탭 = 순위표만
+      }
       if (view === 'rank' || view === 'trophy') {
         currentLeaderboardTab = view;
         fetchLeaderboard();
@@ -915,7 +924,8 @@
     });
     sub('leaderboardData', (data) => {
       if (!data) return;
-      const targetId = data.sortBy === 'rank' ? 'rankLeaderboard' : 'trophyLeaderboard';
+      const isRankTab = data.sortBy === 'rank';
+      const targetId = isRankTab ? 'rankLeaderboard' : 'trophyLeaderboard';
       if (!el(targetId)) return;
       if (!data.entries || data.entries.length === 0) {
         setHTML(targetId, '<div class="lb-empty">No records yet.</div>');
@@ -923,13 +933,25 @@
       }
       const medals = ['🥇', '🥈', '🥉'];
       let html = '';
+
+      // 내 순위 요약 (스크롤해도 맨 위에 고정)
+      const me = data.entries.find((e) => e.isMe);
+      if (me) {
+        const myRankNo = Number.isFinite(me.rank) ? me.rank : null;
+        const myScore = isRankTab ? me.rating : me.trophies;
+        const scoreText = `<strong>${myScore}</strong> ${isRankTab ? 'MMR' : '🏆'}`;
+        html += myRankNo !== null
+          ? `<div class="lb-me-summary">내 순위 <strong>#${myRankNo}</strong> · ${scoreText}</div>`
+          : `<div class="lb-me-summary">내 점수 ${scoreText}</div>`;
+      }
+
       data.entries.forEach((entry, idx) => {
-        const rank = idx + 1;
-        const rankDisplay = rank <= 3 ? `${medals[rank - 1]} #${rank}` : `#${rank}`;
+        const rank = entry.rank === null ? null : (Number.isFinite(entry.rank) ? entry.rank : idx + 1);
+        const rankDisplay = rank === null ? '' : (rank <= 3 ? `${medals[rank - 1]} #${rank}` : `#${rank}`);
         const rowClass = 'lb-row'
           + (entry.isMe ? ' me' : '')
           + (rank === 1 ? ' top1' : rank === 2 ? ' top2' : rank === 3 ? ' top3' : '');
-        const score = data.sortBy === 'rank' ? entry.rating : entry.trophies;
+        const score = isRankTab ? entry.rating : entry.trophies;
         html += `<div class="${rowClass}">`
           + `<span class="lb-rank">${rankDisplay}</span>`
           + `<span class="lb-avatar"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-6 8-6s8 2 8 6z"/></svg></span>`
@@ -938,6 +960,11 @@
           + `</div>`;
       });
       setHTML(targetId, html);
+
+      // 내 줄이 화면 가운데 오도록 스크롤
+      const list = el(targetId);
+      const meRow = list && list.querySelector('.lb-row.me');
+      if (list && meRow) list.scrollTop = Math.max(0, meRow.offsetTop - list.clientHeight / 2);
     });
 
     /* ---------- 9) Reset / matchmaking ---------- */
@@ -952,6 +979,7 @@
       clearRematchState();
       teardownPractice();
       gameEnded = false;
+      resultScreenActive = false;
 
       matchActive = false;
       inGame = false;
@@ -2333,6 +2361,7 @@
 
       const tiEnd = el('typingInput');
       if (tiEnd) tiEnd.disabled = true;
+      setGaugeVisible(false);   // 경기 종료 → 모멘텀 게이지 숨김
       setDisplay('leaveMatchRow', 'none');   // 경기 종료 → Leave Match / 경기 중 신고 버튼 숨김
       if (data.opponentId) lastOpponentId = data.opponentId;
       if (data.roomId) lastRoomId = data.roomId;
@@ -2395,6 +2424,8 @@
       // ★ [랭킹] 이번 판 기록을 랭킹에 등록 요청
       submitRankIfEligible(data);
       setLobbyVisible(true);
+      resultScreenActive = true;
+      switchView('play');
       setPostMatchButtons();
     });
 
@@ -2414,6 +2445,8 @@
       setHTML('resultBanner', `<div class="dash-result-tag win">🏆 WIN (Opponent left)</div>`);
       setClassName('resultBanner', 'result-banner dashboard show');
       setLobbyVisible(true);
+      resultScreenActive = true;
+      switchView('play');
       setPostMatchButtons();
     });
 

@@ -1627,7 +1627,8 @@ io.on('connection', (socket) => {
     const topList = buildTopRankList(rankSortKind); // ★ 계정 단위로 정렬된 리스트를 그대로 재사용
 
     const myId = socket.data && socket.data.playerId;
-    const entries = topList.map((entry) => ({
+    const entries = topList.map((entry, idx) => ({
+      rank: idx + 1,
       playerId: entry.playerId,
       name: accountNames[entry.playerId] || entry.playerId || 'Guest',
       avatar: DEFAULT_AVATAR,
@@ -1639,6 +1640,7 @@ io.on('connection', (socket) => {
     // 내 계정이 상위 100위 밖이라 리스트에 없다면 별도로 채워서 내려준다(기존 동작 유지).
     if (myId && !entries.some((e) => e.playerId === myId)) {
       entries.push({
+        rank: null,
         playerId: myId,
         name: userNames[socket.id] || 'Guest',
         avatar: userAvatars[socket.id] || DEFAULT_AVATAR,
