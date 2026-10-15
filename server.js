@@ -8,29 +8,27 @@ const server = http.createServer(app);
 const io = new Server(server, { cors: { origin: '*' } });
 
 const PORT = process.env.PORT || 3000;
-const BUILD_ID = 'friendly-v20'; // [v20] 실행 중인 서버가 최신 파일인지 확인하는 용도 (화면 우측 하단에도 표시됨)
+const BUILD_ID = 'friendly-v20'; // Shown at the bottom-right of the page to confirm the running server is the latest file
 app.use(express.static(path.join(__dirname, 'public')));
 
-// ★ 랭크전 여부 판정은 반드시 이 함수 하나만 사용한다.
-//   오직 boolean true 일 때만 Ranked. (문자열 "false", 1, undefined 등은 전부 Casual 취급)
+// Ranked detection must go through this function only.
+// Only boolean true counts as Ranked (the string "false", 1, undefined, etc. are all Casual).
 function isRankedFlag(value) {
   return value === true;
 }
 
-// ★ Casual 매치에서도 MMR(레이팅)을 변동시킬지 여부.
-//   false(기본): Casual은 트로피만 변동, MMR/연승은 Ranked 전용 (랭크 매치메이킹/리더보드 MMR 보호)
-//   true: Casual에서도 Ranked와 동일하게 MMR/연승이 증감한다.
+// Whether Casual matches also change MMR.
+//   false (default): Casual changes trophies only; MMR / win streak are Ranked-only.
+//   true: Casual changes MMR / streak the same way Ranked does.
 const CASUAL_MMR_ENABLED = false;
 
 // ============================================================
-// ★ 트로피는 Casual(일반전) 전용이다.
-//   - Ranked 경기는 승/패/무 상관없이 트로피가 절대 변동하지 않는다. (Ranked는 MMR/연승만 변동)
-//   - ★ 친선(커스텀 룸) 경기도 승/패/무/기권 상관없이 트로피·MMR·연승·일반전 승수가 절대 변동하지 않는다.
-//     (결과 화면은 일반전과 똑같이 WIN / LOSE + "+0 Trophies"로 표시된다.)
-//   - 승리: +10 트로피 (상대 기권승 포함) / 패배: 0 (트로피 절대 안 깎임) / 무승부: 0
-//   - 내가 기권(이탈)하면 패배 처리 → 0 (손해도 보상도 없음)
-//   - 연승 보너스 없음, 시간 모드 배율 없음 (항상 정확히 +10, 누적형)
-//   - 같은 계정끼리 붙은 판(invalidated)은 변동 없음.
+// Trophies are Casual-only.
+//   - Ranked matches never change trophies (they only change MMR / streak).
+//   - Friendly (custom room) matches never change trophies, MMR, streak or Casual win count.
+//   - Win: +10 trophies (including an opponent forfeit) / Loss: 0 / Draw: 0
+//   - Leaving a match counts as a loss -> 0.
+//   - Same-account matches (invalidated) change nothing.
 // ============================================================
 const CASUAL_WIN_TROPHIES = 10;
 const CASUAL_LOSE_TROPHIES = 0;
@@ -43,60 +41,55 @@ function getCasualTrophyChange(result) {
 }
 
 // ============================================================
-// ★ Ranked MMR 규칙 (고정 점수제 + 부드러운 연승 보너스)
-//   - 시작 MMR 100, 최소 0점 (0 미만으로 내려가지 않음)
-//   - 승리: 상대 기권승 / 점수차 10 미만 +15
-//           점수차 10 이상 ~ 60 미만 +25   (정확히 10점 차이는 +25 구간)
-//           점수차 60 이상 압승 +30
-//   - 패배: 내가 기권패 / 점수차 10 미만 -10
-//           점수차 10 이상 ~ 60 미만 -20
-//           점수차 60 이상 완패 -25
-//     (패배 감점은 승리 점수보다 5점씩 적다 → 승률 50% 유저도 천천히 등반 가능)
-//   - 연승 보너스: 1~2연승 +0 / 3연승부터 1연승 늘 때마다 +2 (3연승 +2, 4연승 +4 ...) / 10연승 이상 +16 고정
-//   - 패배(또는 기권)하면 연승 0으로 리셋. 무승부는 MMR/연승 모두 변동 없음.
-//   "점수차" = 두 플레이어의 netCorrect(순 정타 글자 수) 차이.
-//   (수치를 바꾸고 싶으면 아래 상수만 수정하면 된다.)
+// Ranked MMR rules (fixed points + gentle win-streak bonus)
+//   - Start MMR 100, minimum 0.
+//   - Win:  opponent forfeit / margin < 10 -> +15
+//           margin 10..59 -> +25
+//           margin >= 60 -> +30
+//   - Loss: forfeit / margin < 10 -> -10
+//           margin 10..59 -> -20
+//           margin >= 60 -> -25
+//   - Streak bonus: 1-2 wins +0 / from 3 wins +2 per extra win / capped at +16 (10+ wins)
+//   - A loss (or forfeit) resets the streak to 0. A draw changes nothing.
+//   "Margin" = difference of the two players' netCorrect.
 // ============================================================
 const MMR_START = 100;
 const MMR_MIN = 0;
 
-const MMR_WIN_REDUCED = 15;          // 기권승 / 점수차 10 미만 신승
-const MMR_WIN_BASE = 25;             // 점수차 10 이상 ~ 60 미만
-const MMR_WIN_DOMINANT = 30;         // 점수차 60 이상 압승
-const MMR_LOSE_REDUCED = -10;        // 기권패 / 점수차 10 미만 패배
-const MMR_LOSE_BASE = -20;           // 점수차 10 이상 ~ 60 미만 패배
-const MMR_LOSE_HEAVY = -25;          // 점수차 60 이상 완패
+const MMR_WIN_REDUCED = 15;
+const MMR_WIN_BASE = 25;
+const MMR_WIN_DOMINANT = 30;
+const MMR_LOSE_REDUCED = -10;
+const MMR_LOSE_BASE = -20;
+const MMR_LOSE_HEAVY = -25;
 
-const MMR_CLOSE_MARGIN = 10;         // 이 값 미만 차이는 접전(신승/석패)
-const MMR_DOMINANT_MARGIN = 60;      // 이 값 이상 차이면 압승/완패
+const MMR_CLOSE_MARGIN = 10;
+const MMR_DOMINANT_MARGIN = 60;
 
-const STREAK_BONUS_START = 3;        // 이 연승부터 보너스 시작
-const STREAK_BONUS_STEP = 2;         // 연승 1회 증가당 추가 보너스
-const STREAK_BONUS_MAX = 16;         // 보너스 상한 (10연승 이상 고정)
+const STREAK_BONUS_START = 3;
+const STREAK_BONUS_STEP = 2;
+const STREAK_BONUS_MAX = 16;
 
-// 현재 연승 수(방금 이긴 판을 포함한 값)에 대한 보너스 MMR
 function getStreakBonus(streak) {
   if (!Number.isFinite(streak) || streak < STREAK_BONUS_START) return 0;
   return Math.min(STREAK_BONUS_MAX, (streak - STREAK_BONUS_START + 1) * STREAK_BONUS_STEP);
 }
 
-// 승자 기본 점수 (연승 보너스 제외)
 function getWinBase(scoreMargin, isNoContest) {
-  if (isNoContest) return MMR_WIN_REDUCED;                    // 기권승(상대 이탈/부정행위 실격)
+  if (isNoContest) return MMR_WIN_REDUCED;
   if (scoreMargin >= MMR_DOMINANT_MARGIN) return MMR_WIN_DOMINANT;
   if (scoreMargin < MMR_CLOSE_MARGIN) return MMR_WIN_REDUCED;
   return MMR_WIN_BASE;
 }
 
-// 패자 기본 점수
 function getLoseBase(scoreMargin, isNoContest) {
-  if (isNoContest) return MMR_LOSE_REDUCED;                   // 기권패는 점수차와 무관하게 -10
+  if (isNoContest) return MMR_LOSE_REDUCED;
   if (scoreMargin >= MMR_DOMINANT_MARGIN) return MMR_LOSE_HEAVY;
   if (scoreMargin < MMR_CLOSE_MARGIN) return MMR_LOSE_REDUCED;
   return MMR_LOSE_BASE;
 }
 
-// 한 판의 최종 MMR/연승 변동을 계산한다. (상태를 직접 바꾸지 않는 순수 함수)
+// Pure function: computes the final MMR / streak change for one match.
 function calculateRankedMmr({ winnerRating, loserRating, winnerPrevStreak, scoreMargin, isNoContest }) {
   const winnerNewStreak = (Number.isFinite(winnerPrevStreak) ? winnerPrevStreak : 0) + 1;
   const winBase = getWinBase(scoreMargin, isNoContest);
@@ -113,7 +106,7 @@ function calculateRankedMmr({ winnerRating, loserRating, winnerPrevStreak, score
     loser: {
       baseChange: loseBase,
       newStreak: 0,
-      newRating: Math.max(MMR_MIN, loserRating + loseBase)   // 0점 밑으로 내려가지 않음
+      newRating: Math.max(MMR_MIN, loserRating + loseBase)
     }
   };
 }
@@ -169,8 +162,7 @@ function runSeasonResets() {
   }
 }
 
-// ★ 단어 풀: 총 300개 (중복 없음). index.html의 WORD_POOL 배열과 반드시 동일해야 한다.
-//   - 1~110번: 기존 단어 / 111~300번: 신규 추가 단어
+// Word pool: 300 unique words. Must match WORD_POOL in index.html exactly.
 const timeModeWordPool = [
   "the", "be", "to", "of", "and", "a", "in", "that", "have", "it",
   "for", "not", "on", "with", "he", "as", "you", "do", "at", "this",
@@ -204,82 +196,76 @@ const timeModeWordPool = [
   "teacher", "force", "offer", "enough", "education", "across", "although", "remember", "foot", "second"
 ];
 
-// 안전장치: 단어 풀이 300개가 아니거나 중복이 있으면 서버 시작 시 경고를 출력한다.
 if (timeModeWordPool.length !== 300 || new Set(timeModeWordPool).size !== timeModeWordPool.length) {
-  console.warn(`[WordPool] 경고: 단어 수=${timeModeWordPool.length}, 고유 단어 수=${new Set(timeModeWordPool).size} (300개/중복 없음이어야 함)`);
+  console.warn(`[WordPool] Warning: words=${timeModeWordPool.length}, unique=${new Set(timeModeWordPool).size} (expected 300 unique words)`);
 }
 
 const ALLOWED_TIME_DURATIONS = [30, 60, 120];
 const DEFAULT_TIME_DURATION = 60;
 
-// ★ 서버 주도 카운트다운: 3 -> 2 -> 1 -> START 를 서버가 1초 간격으로 직접 방송한다.
-//   클라이언트 시계(Date.now)는 전혀 사용하지 않는다.
+// Server-driven countdown: 3 -> 2 -> 1 -> START broadcast once per second. Client clocks are not used.
 const COUNTDOWN_SECONDS = 3;
 const COUNTDOWN_TICK_MS = 1000;
 
-// ★ 랭크 해금에 필요한 일반전 승수. (일반전 3승 달성 시 경쟁전 해금)
+// Casual wins required to unlock Ranked.
 const RANKED_UNLOCK_WINS = 3;
 
-// ★ [v15] Net Chars 산정 방식.
-//   클라이언트가 progress 이벤트에 `typed`(현재 화면에 입력되어 있는 문자열 전체)를 보내면,
-//   서버가 room.text와 자리별로 직접 비교해서 netCorrect / charIndex를 계산한다.
-//   → 입력 도중 맞게 쳤다가 Backspace로 지우고 틀리게 고친 글자는 점수에 포함되지 않는다.
-//   false(기본): typed가 없는 옛 클라이언트는 기존처럼 클라이언트가 보낸 netCorrect를 사용 (구버전 호환, 버그 유지됨)
-//   true: typed가 없는 progress는 통째로 무시 (index.html 수정 완료 후 켜는 것을 권장)
+// Net Chars scoring: the client sends `typed` (the full string currently on screen) with each progress event,
+// and the server compares it to room.text itself. Characters typed correctly and then erased do not count.
+//   false: progress without `typed` falls back to the client-sent netCorrect (legacy clients)
+//   true:  progress without `typed` is ignored
 const REQUIRE_TYPED_SNAPSHOT = false;
 
-// --- Anti-Cheat: 타이핑 검증 ---
-const ANTICHEAT_MIN_INTERVAL_MS = 20;          // 이 값 미만 간격이 연속되면 매크로 의심
-const ANTICHEAT_MIN_INTERVAL_STRIKE_COUNT = 5;  // 연속 위반이 이 횟수 이상이면 즉시 판정
-const ANTICHEAT_UNIFORMITY_WINDOW = 12;         // 정속 패턴 판정에 쓰는 최근 입력 개수
-const ANTICHEAT_UNIFORMITY_STDDEV_MS = 3;       // 표준편차가 이 값 미만이면 "정밀한 정속 입력"으로 의심
-const ANTICHEAT_UNIFORMITY_MEAN_MAX_MS = 90;    // 위 판정은 평균 간격도 충분히 빠를 때만 적용 (느리지만 꾸준한 사람도 있으므로)
-const ANTICHEAT_MAX_WPM = 250;                  // 지속 최고 속도 제한
-const ANTICHEAT_MAX_WPM_MIN_CHARS = 40;         // 이 정도 타이핑 후부터 WPM 판정 시작 (초반 표본 부족 방지)
-const ANTICHEAT_DELTA_HISTORY_CAP = 400;        // 플레이어별 delta 보관 최대 개수 (메모리 보호)
+// --- Anti-Cheat ---
+const ANTICHEAT_MIN_INTERVAL_MS = 20;
+const ANTICHEAT_MIN_INTERVAL_STRIKE_COUNT = 5;
+const ANTICHEAT_UNIFORMITY_WINDOW = 12;
+const ANTICHEAT_UNIFORMITY_STDDEV_MS = 3;
+const ANTICHEAT_UNIFORMITY_MEAN_MAX_MS = 90;
+const ANTICHEAT_MAX_WPM = 250;
+const ANTICHEAT_MAX_WPM_MIN_CHARS = 40;
+const ANTICHEAT_DELTA_HISTORY_CAP = 400;
 
 const userRatings = {};
-const userStreaks = {};     // { socketId: 현재 Ranked 연승 수 }
+const userStreaks = {};
 const userNames = {};
 const userAvatars = {};
 const userNormalWins = {};
 const accountNormalWins = {};
-const waitingNormalPlayers = {}; // { matchKey: [socket, ...] } — 대기열 (동일 계정 매칭 방지 필터 적용)
+const waitingNormalPlayers = {};
 const userTrophies = {};
 const accountTrophies = {};
 const accountRatings = {};
-const accountStreaks = {};  // { playerId: 현재 Ranked 연승 수 } — 재접속해도 유지
+const accountStreaks = {};
 const accountNames = {};
 
 // ============================================================
-// ★ [랭킹 시스템] 영구 저장(ranks.json) / 랭킹 등록 검증 / 어드민 API
+// Persistent storage (ranks.json) / leaderboard submission validation / admin API
 // ============================================================
 const crypto = require('crypto');
 const fs = require('fs');
 
 const RANKS_FILE = path.join(__dirname, 'ranks.json');
 
-// ★ 어드민 비밀키: 배포 시 반드시 환경변수 ADMIN_SECRET 으로 교체할 것. (기본값은 테스트용)
+// Set the ADMIN_SECRET environment variable in production. The default is for testing only.
 const ADMIN_SECRET = process.env.ADMIN_SECRET || 'admin123';
 if (!process.env.ADMIN_SECRET) {
-  console.warn('[Admin] 경고: ADMIN_SECRET 환경변수가 없어 기본값(admin123)을 사용 중입니다. 배포 전에 반드시 바꾸세요.');
+  console.warn('[Admin] Warning: ADMIN_SECRET is not set, using the default (admin123). Change it before deploying.');
 }
 
-// --- 랭킹 등록 검증 기준 (수치는 여기서만 수정) ---
-const RANK_MAX_WPM = ANTICHEAT_MAX_WPM;     // 250 WPM 초과 기록은 등록 거부
-const RANK_MIN_ELAPSED_MS = 10000;          // 너무 짧은 판(10초 미만)은 기록 등록 불가
-const RANK_MIN_DELTAS = 30;                 // 키 간격 표본 최소 개수
-const RANK_MAX_DELTAS = 5000;               // 비정상적으로 큰 배열 방어
-const RANK_MIN_MEAN_INTERVAL_MS = ANTICHEAT_MIN_INTERVAL_MS; // 평균 간격이 이보다 짧으면 사람이 아님
-const RANK_UNIFORM_STDDEV_MS = 8;           // 표준편차가 이 값 미만이면 "매크로처럼 일정한 속도"로 의심
-const RANK_UNIFORM_MEAN_MAX_MS = 120;       // 위 판정은 평균 간격이 이 값 이하(충분히 빠를 때)만 적용
-const RANK_CROSSCHECK_ENABLED = true;       // 간격 합계와 실제 경기 시간이 크게 안 맞으면 거부 (끄려면 false)
-const RANK_PENDING_TTL_MS = 60000;          // 경기 종료 후 이 시간 안에 등록 요청해야 함
+const RANK_MAX_WPM = ANTICHEAT_MAX_WPM;
+const RANK_MIN_ELAPSED_MS = 10000;
+const RANK_MIN_DELTAS = 30;
+const RANK_MAX_DELTAS = 5000;
+const RANK_MIN_MEAN_INTERVAL_MS = ANTICHEAT_MIN_INTERVAL_MS;
+const RANK_UNIFORM_STDDEV_MS = 8;
+const RANK_UNIFORM_MEAN_MAX_MS = 120;
+const RANK_CROSSCHECK_ENABLED = true;
+const RANK_PENDING_TTL_MS = 60000;
 
-// 플레이어별 최고 기록: rankRecords[playerId] = { playerId, name, bests: { '30': {...}, '60': {...}, '120': {...} } }
+// rankRecords[playerId] = { playerId, name, bests: { '30': {...}, '60': {...}, '120': {...} } }
 const rankRecords = {};
 
-// --- 파일 저장 / 불러오기 ---
 let ranksSaveTimer = null;
 
 function buildRanksSnapshot() {
@@ -303,9 +289,9 @@ function saveRanksNow() {
   try {
     const tmpFile = RANKS_FILE + '.tmp';
     fs.writeFileSync(tmpFile, JSON.stringify(buildRanksSnapshot()));
-    fs.renameSync(tmpFile, RANKS_FILE); // 쓰는 도중 서버가 꺼져도 기존 파일이 깨지지 않도록 임시파일 → 교체
+    fs.renameSync(tmpFile, RANKS_FILE); // write to a temp file then swap, so a crash never corrupts the existing file
   } catch (err) {
-    console.error('[Ranks] 저장 실패:', err.message);
+    console.error('[Ranks] Save failed:', err.message);
   }
 }
 
@@ -320,7 +306,7 @@ function scheduleRanksSave() {
 function loadRanks() {
   try {
     if (!fs.existsSync(RANKS_FILE)) {
-      console.log('[Ranks] ranks.json 없음 → 새로 시작합니다.');
+      console.log('[Ranks] ranks.json not found, starting fresh.');
       return;
     }
     const data = JSON.parse(fs.readFileSync(RANKS_FILE, 'utf8'));
@@ -333,68 +319,61 @@ function loadRanks() {
     Object.assign(accountStreaks, acc.streaks || {});
     Object.assign(accountNames, acc.names || {});
     Object.assign(seasonState, data.season || {});
-    console.log(`[Ranks] ranks.json 불러옴: 계정 ${Object.keys(accountRatings).length}개, 기록 ${Object.keys(rankRecords).length}명`);
+    console.log(`[Ranks] Loaded ranks.json: ${Object.keys(accountRatings).length} accounts, ${Object.keys(rankRecords).length} records`);
   } catch (err) {
-    console.error('[Ranks] 불러오기 실패 (파일이 손상되었을 수 있음):', err.message);
+    console.error('[Ranks] Load failed (the file may be corrupted):', err.message);
   }
 }
 
 loadRanks();
-setInterval(saveRanksNow, 30000); // 안전장치: 30초마다 자동 저장
+setInterval(saveRanksNow, 30000);
 ['SIGINT', 'SIGTERM'].forEach((sig) => {
   process.on(sig, () => { saveRanksNow(); process.exit(0); });
 });
 
-// --- 랭킹 등록 검증 ---
-// pending: endGame에서 서버가 직접 계산해 둔 기록 { wpm, grossWpm, elapsedMs, ... }
-// rawDeltas: 클라이언트가 보낸 키 입력 간격(ms) 배열
+// pending: record computed by the server in endGame { wpm, grossWpm, elapsedMs, ... }
+// rawDeltas: keystroke intervals (ms) sent by the client
 function validateRankSubmission(pending, rawDeltas) {
-  // 1) WPM 상한선 (서버 계산값 기준)
   if (pending.wpm > RANK_MAX_WPM || pending.grossWpm > RANK_MAX_WPM) {
-    return { ok: false, code: 'WPM_LIMIT', message: `${RANK_MAX_WPM} WPM을 초과한 기록은 등록할 수 없습니다.` };
+    return { ok: false, code: 'WPM_LIMIT', message: `Records above ${RANK_MAX_WPM} WPM cannot be submitted.` };
   }
   if (pending.elapsedMs < RANK_MIN_ELAPSED_MS) {
-    return { ok: false, code: 'TOO_SHORT', message: '너무 짧은 경기는 랭킹에 등록할 수 없습니다.' };
+    return { ok: false, code: 'TOO_SHORT', message: 'Matches that are too short cannot be submitted to the leaderboard.' };
   }
 
-  // 2) 키 간격 배열 형식 검증
   if (!Array.isArray(rawDeltas) || rawDeltas.length < RANK_MIN_DELTAS || rawDeltas.length > RANK_MAX_DELTAS) {
-    return { ok: false, code: 'INVALID_DELTAS', message: '키 입력 기록이 올바르지 않습니다.' };
+    return { ok: false, code: 'INVALID_DELTAS', message: 'Invalid keystroke data.' };
   }
   if (!rawDeltas.every((d) => Number.isFinite(d) && d >= 0 && d < 10000)) {
-    return { ok: false, code: 'INVALID_DELTAS', message: '키 입력 기록에 비정상 값이 있습니다.' };
+    return { ok: false, code: 'INVALID_DELTAS', message: 'Keystroke data contains abnormal values.' };
   }
 
-  // 3) 표본 개수가 실제 타수와 너무 동떨어지면(짧은 가짜 배열) 거부
   if (rawDeltas.length < pending.totalTyped * 0.5) {
-    return { ok: false, code: 'DELTAS_MISMATCH', message: '키 입력 기록이 실제 입력 수와 맞지 않습니다.' };
+    return { ok: false, code: 'DELTAS_MISMATCH', message: 'Keystroke data does not match the actual number of keystrokes.' };
   }
 
   const n = rawDeltas.length;
   const sum = rawDeltas.reduce((a, b) => a + b, 0);
   const mean = sum / n;
 
-  // 4) 간격 합계가 실제 경기 시간과 너무 다르면 거부 (가짜 배열 방어)
   if (RANK_CROSSCHECK_ENABLED && (sum < pending.elapsedMs * 0.5 || sum > pending.elapsedMs * 1.5)) {
-    return { ok: false, code: 'TIME_MISMATCH', message: '키 입력 시간이 경기 시간과 맞지 않습니다.' };
+    return { ok: false, code: 'TIME_MISMATCH', message: 'Keystroke timing does not match the match duration.' };
   }
 
-  // 5) 사람이 칠 수 없는 평균 속도
   if (mean < RANK_MIN_MEAN_INTERVAL_MS) {
-    return { ok: false, code: 'MACRO_MIN_INTERVAL', message: '비정상적으로 빠른 입력이 감지되었습니다.' };
+    return { ok: false, code: 'MACRO_MIN_INTERVAL', message: 'Abnormally fast input was detected.' };
   }
 
-  // 6) 표준편차 검사: 빠른데 간격이 너무 일정하면 매크로로 의심
   const variance = rawDeltas.reduce((a, b) => a + (b - mean) * (b - mean), 0) / n;
   const stddev = Math.sqrt(variance);
   if (mean <= RANK_UNIFORM_MEAN_MAX_MS && stddev < RANK_UNIFORM_STDDEV_MS) {
-    return { ok: false, code: 'MACRO_UNIFORM_TIMING', message: '입력 간격이 기계처럼 일정하여 등록이 거부되었습니다.' };
+    return { ok: false, code: 'MACRO_UNIFORM_TIMING', message: 'Submission rejected: keystroke intervals are too uniform.' };
   }
 
   return { ok: true, mean, stddev };
 }
 
-// --- 어드민 API ---
+// --- Admin API ---
 app.use(express.json({ limit: '10kb' }));
 
 function safeEqual(a, b) {
@@ -403,18 +382,18 @@ function safeEqual(a, b) {
   return crypto.timingSafeEqual(ha, hb);
 }
 
-// 헤더 x-admin-secret 또는 body.secret 으로 키를 받는다.
+// The key is read from the x-admin-secret header or body.secret.
 function requireAdmin(req, res) {
   const provided = req.get('x-admin-secret') || (req.body && req.body.secret) || '';
   if (!provided || !safeEqual(provided, ADMIN_SECRET)) {
-    console.warn(`[Admin] 인증 실패: ${req.ip} ${req.path}`);
+    console.warn(`[Admin] Auth failed: ${req.ip} ${req.path}`);
     res.status(401).json({ success: false, message: 'Unauthorized' });
     return false;
   }
   return true;
 }
 
-// 접속 중인 소켓의 메모리 상 랭킹 값을 초기값으로 되돌리고 클라이언트에 반영한다.
+// Resets an online socket's in-memory ranking values and pushes them to the client.
 function resetOnlineSocketRanking(socketId) {
   const sock = io.sockets.sockets.get(socketId);
   if (!sock) return;
@@ -428,7 +407,7 @@ function resetOnlineSocketRanking(socketId) {
   sock.emit('trophyUpdate', { trophies: 0 });
 }
 
-// POST /api/admin/reset  — 전체 랭킹 초기화
+// POST /api/admin/reset - reset all rankings
 app.post('/api/admin/reset', (req, res) => {
   if (!requireAdmin(req, res)) return;
 
@@ -437,11 +416,11 @@ app.post('/api/admin/reset', (req, res) => {
   for (const socketId of io.sockets.sockets.keys()) resetOnlineSocketRanking(socketId);
 
   saveRanksNow();
-  console.log('[Admin] 전체 랭킹 초기화 완료');
+  console.log('[Admin] All rankings reset');
   res.json({ success: true, message: 'All rankings reset.' });
 });
 
-// POST /api/admin/delete  — 특정 플레이어 ID 랭킹 삭제   body: { "playerId": "Player #ABC123" }
+// POST /api/admin/delete - delete one player's ranking data   body: { "playerId": "Player #ABC123" }
 app.post('/api/admin/delete', (req, res) => {
   if (!requireAdmin(req, res)) return;
 
@@ -457,14 +436,14 @@ app.post('/api/admin/delete', (req, res) => {
   if (playerIdToSocket[playerId]) resetOnlineSocketRanking(playerIdToSocket[playerId]);
 
   saveRanksNow();
-  console.log(`[Admin] 플레이어 랭킹 삭제: ${playerId} (existed=${existed})`);
+  console.log(`[Admin] Player ranking deleted: ${playerId} (existed=${existed})`);
   res.json({ success: true, playerId, existed });
 });
 
 const ALLOWED_AVATARS = ['😀', '😎', '🤖', '🐱', '🐶', '🦊', '🐼', '🐵', '🔥', '⚡', '🎯', '🚀'];
 const DEFAULT_AVATAR = ALLOWED_AVATARS[0];
 
-// MMR이 0점일 때도 falsy 취급되어 1000으로 돌아가지 않도록, 항상 이 함수로 읽는다.
+// Always read ratings through this so an MMR of 0 is not treated as falsy.
 function getRating(socketId) {
   return Number.isFinite(userRatings[socketId]) ? userRatings[socketId] : MMR_START;
 }
@@ -473,12 +452,10 @@ function getStreak(socketId) {
   return Number.isFinite(userStreaks[socketId]) ? userStreaks[socketId] : 0;
 }
 
-// --- 중복 접속 / 어뷰징 방지 (Anti-Abuse) ---
-// [주의] 테스트 목적으로 IP 기반 판정은 완전히 제거됨. 동일 playerId(계정) 기준으로만 판정한다.
-const playerIdToSocket = {}; // { playerId: socketId } — 동일 계정 다중 접속 차단용
+// --- Anti-Abuse ---
+// IP-based checks are removed for testing. Only the same playerId (account) is checked.
+const playerIdToSocket = {};
 
-// 두 소켓이 같은 계정(playerId)에서 접속했는지 판정한다.
-// true면 매칭이 성립되지 않고, 이미 진행된 대전(커스텀 룸 등)이라면 보상이 무효화된다.
 function isAbusivePair(socketA, socketB) {
   if (!socketA || !socketB) return false;
   const pidA = socketA.data && socketA.data.playerId;
@@ -486,7 +463,6 @@ function isAbusivePair(socketA, socketB) {
   return !!(pidA && pidB && pidA === pidB);
 }
 
-// Player # + 6자리 랜덤 숫자 형태의 닉네임 생성
 function generatePlayerCode() {
   const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
   let result = '';
@@ -500,7 +476,7 @@ function generatePlayerNick(code) {
   return `Player #${code}`;
 }
 
-// 랭킹 순위 기반 닉네임 태그 생성 (100위 이내에만 [#순위] 태그 부여)
+// Rank tag for nicknames (only players in the top 100 get a [#rank] tag)
 function buildPlayerTags(playerId, topRankList) {
   if (!topRankList) return '';
   const idx = topRankList.findIndex(entry => entry.playerId === playerId);
@@ -510,7 +486,6 @@ function buildPlayerTags(playerId, topRankList) {
   return '';
 }
 
-// 기존 닉네임에 붙은 [#...] 태그를 모두 떼어내고, 새로 받은 랭킹 태그를 붙여 반환한다.
 function appendDynamicTag(baseNick, rankTag) {
   const base = baseNick || '';
   const coreName = base.replace(/\[[^\]]*\]\s*/g, '').trim();
@@ -519,27 +494,19 @@ function appendDynamicTag(baseNick, rankTag) {
 }
 
 // ============================================================
-// ★ 랭킹 계산은 "현재 접속 중인 소켓" 단위가 아니라
-//   "계정(playerId)" 단위로, 그리고 접속 여부와 무관하게
-//   서버가 알고 있는 전체 계정 데이터(accountRatings 등)를 기준으로 계산한다.
-//
-//   - playerId(계정)별로 유일하게 하나의 항목만 존재하도록 dedupe.
-//   - 접속 중이면 최신 socket 기준 값(userRatings 등), 아니면 영구 저장된
-//     accountRatings/accountTrophies/accountNormalWins 값을 사용.
-//   - 1차: rating(또는 trophy) 내림차순, 2차: 승수(wins) 내림차순,
-//     3차: playerId 문자열 비교(완전한 동점자까지 결정론적으로 순서 고정)
-//     로 정렬해 동일 입력에 대해 항상 동일한 순위가 나오도록 보장.
+// Rankings are computed per account (playerId), whether or not the account is online.
+//   - One entry per playerId (deduped).
+//   - Online: latest in-memory values. Offline: persisted account values.
+//   - Sort: score desc, then Casual wins desc, then playerId (fully deterministic).
 // ============================================================
 
-// 현재 서버가 알고 있는 전체 계정 기준 랭킹 리스트(상위 100명)를 만든다.
-// sortBy: 'rating' (MMR 기준, 기본값) | 'trophy' (트로피 기준)
+// sortBy: 'rating' (MMR, default) | 'trophy'
 function buildTopRankList(sortBy = 'rating') {
   const byAccount = new Map();
 
-  // 1) 현재 접속 중인 소켓들의 최신 값을 계정 단위로 모은다.
   for (const [socketId, sock] of io.sockets.sockets) {
     const playerId = sock.data && sock.data.playerId;
-    if (!playerId) continue; // 아직 identify 되지 않은 소켓은 랭킹에서 제외
+    if (!playerId) continue;
     byAccount.set(playerId, {
       playerId,
       rating: Number.isFinite(userRatings[socketId]) ? userRatings[socketId] : (accountRatings[playerId] ?? MMR_START),
@@ -548,7 +515,6 @@ function buildTopRankList(sortBy = 'rating') {
     });
   }
 
-  // 2) 현재 접속하지 않은(오프라인) 계정도 영구 저장된 값 기준으로 포함시킨다.
   for (const playerId of Object.keys(accountRatings)) {
     if (byAccount.has(playerId)) continue;
     byAccount.set(playerId, {
@@ -563,15 +529,14 @@ function buildTopRankList(sortBy = 'rating') {
 
   const primaryKey = sortBy === 'trophy' ? 'trophies' : 'rating';
   list.sort((a, b) => {
-    if (b[primaryKey] !== a[primaryKey]) return b[primaryKey] - a[primaryKey]; // 1차: 점수 내림차순
-    if (b.wins !== a.wins) return b.wins - a.wins;                             // 2차: 일반전 승수 내림차순
-    return a.playerId.localeCompare(b.playerId);                               // 3차: 계정ID 사전순(완전 동률 결정론적 처리)
+    if (b[primaryKey] !== a[primaryKey]) return b[primaryKey] - a[primaryKey];
+    if (b.wins !== a.wins) return b.wins - a.wins;
+    return a.playerId.localeCompare(b.playerId);
   });
 
   return list.slice(0, 100);
 }
 
-// 주어진 소켓 ID에 대해, 현재 전역 랭킹 순위 기반 태그를 생성한다.
 function buildRankTagForSocket(socketId) {
   const sock = io.sockets.sockets.get(socketId);
   const playerId = sock && sock.data ? sock.data.playerId : null;
@@ -580,8 +545,7 @@ function buildRankTagForSocket(socketId) {
   return buildPlayerTags(playerId, topRankList);
 }
 
-// 주어진 소켓 ID의 현재 전역 순위(1~100)를 반환. 100위 밖이거나 미식별 소켓이면 null.
-// sortBy: 'rating' (기본값, MMR 기준) | 'trophy'
+// Returns the current global rank (1-100), or null if outside the top 100 or not identified.
 function getPlayerRankInfo(socketId, sortBy = 'rating') {
   const sock = io.sockets.sockets.get(socketId);
   const playerId = sock && sock.data ? sock.data.playerId : null;
@@ -596,10 +560,10 @@ const rooms = {};
 const customRooms = {}; // { CODE: { mode, duration, isRanked, players: [socket] } }
 
 // --- Rematch System ---
-const REMATCH_TIMEOUT_MS = 10000; // 재경기 수락 대기 시간 (10초)
-const RECENT_MATCH_TTL_MS = 60000; // 경기 종료 후 재경기 요청이 가능한 유효 시간
-const recentMatches = {}; // { roomId: { playerIds: [idA, idB], mode, duration, isRanked, isFriendly } } — 방금 끝난 경기 정보
-const pendingRematches = {}; // { roomId: { accepted: Set<socketId>, timeoutId } } — 재경기 수락 대기 상태
+const REMATCH_TIMEOUT_MS = 10000;
+const RECENT_MATCH_TTL_MS = 60000;
+const recentMatches = {};
+const pendingRematches = {};
 
 function cleanupPendingRematch(roomId) {
   const pending = pendingRematches[roomId];
@@ -610,14 +574,13 @@ function cleanupPendingRematch(roomId) {
 }
 
 // --- Report System ---
-const reportLogs = [];                 // 최근 신고 로그 (최대 1000건만 메모리에 보관)
-const reportedInMatch = {};            // { roomId: Set<reporterPlayerId> } — 한 경기에서 한 명당 1회만 신고 가능
-const reportCounts = {};               // { targetPlayerId: { total, uniqueReporters:Set, byReason:{}, lastReportedAt } }
-const reportableMatches = {};          // { roomId: { players: { playerId: name } } } — 종료된 경기의 신고 가능 목록
-const REPORTABLE_MATCH_TTL_MS = 10 * 60 * 1000;  // 경기 종료 후 10분 동안만 신고 가능
-const REPORT_ALERT_THRESHOLDS = [3, 5, 10];       // 누적 신고가 이 횟수에 도달하면 서버 로그에 경고
+const reportLogs = [];
+const reportedInMatch = {};
+const reportCounts = {};
+const reportableMatches = {};
+const REPORTABLE_MATCH_TTL_MS = 10 * 60 * 1000;
+const REPORT_ALERT_THRESHOLDS = [3, 5, 10];
 
-// 신고 1건을 누적 집계에 반영하고, 갱신된 집계를 반환한다.
 function registerReport(entry) {
   const c = reportCounts[entry.targetId] || (reportCounts[entry.targetId] = {
     total: 0, uniqueReporters: new Set(), byReason: {}, lastReportedAt: null
@@ -629,7 +592,7 @@ function registerReport(entry) {
   return c;
 }
 
-// GET /api/admin/reports — 누적 신고가 많은 순서 (헤더 x-admin-secret 필요)
+// GET /api/admin/reports - most-reported players first (needs the x-admin-secret header)
 app.get('/api/admin/reports', (req, res) => {
   if (!requireAdmin(req, res)) return;
   const reports = Object.entries(reportCounts)
@@ -691,14 +654,14 @@ function generateRoomCode() {
 }
 
 const TIERS = [
-  { min: 1600, label: '챌린저', color: '#f97316', icon: '🔥' },
-  { min: 1300, label: '마스터', color: '#a855f7', icon: '👑' },
-  { min: 1000, label: '다이아몬드', color: '#38bdf8', icon: '💎' },
-  { min: 750, label: '플래티넘', color: '#14b8a6', icon: '💠' },
-  { min: 500, label: '골드', color: '#e2b714', icon: '🥇' },
-  { min: 300, label: '실버', color: '#c0c0c0', icon: '🥈' },
-  { min: 150, label: '브론즈', color: '#cd7f32', icon: '🥉' },
-  { min: -Infinity, label: '아이언', color: '#8b8f98', icon: '⛓️' }
+  { min: 1600, label: 'Challenger', color: '#f97316', icon: '🔥' },
+  { min: 1300, label: 'Master', color: '#a855f7', icon: '👑' },
+  { min: 1000, label: 'Diamond', color: '#38bdf8', icon: '💎' },
+  { min: 750, label: 'Platinum', color: '#14b8a6', icon: '💠' },
+  { min: 500, label: 'Gold', color: '#e2b714', icon: '🥇' },
+  { min: 300, label: 'Silver', color: '#c0c0c0', icon: '🥈' },
+  { min: 150, label: 'Bronze', color: '#cd7f32', icon: '🥉' },
+  { min: -Infinity, label: 'Iron', color: '#8b8f98', icon: '⛓️' }
 ];
 
 function getTierInfo(rating) {
@@ -724,7 +687,7 @@ function pickNextWord(pool, prevWord) {
   return source[Math.floor(Math.random() * source.length)];
 }
 
-// 대전(1v1) 텍스트와 연습 모드 텍스트 모두 이 함수를 통해 300개 단어 풀(timeModeWordPool)에서 무작위 추출된다.
+// Both match text and practice text are drawn at random from the 300-word pool.
 function generateRandomText(targetWordCount) {
   const words = [];
   let prevWord = null;
@@ -747,14 +710,177 @@ function generateUniqueText(mode, duration, previousText = '') {
   return newText;
 }
 
+// ============================================================
+// ★ AI 봇 매칭 (일반전 대기열 전용)
+// ============================================================
+const BOT_WAIT_MS = 5000;           // 이 시간 동안 상대가 없으면 봇을 투입
+const BOT_WPM_MIN = 55;
+const BOT_WPM_MAX = 70;
+const BOT_TYPO_RATE = 0.04;         // 글자당 오타(후 정정) 확률
+const BOT_MATCH_REWARDS = true;     // false: 봇전은 트로피/MMR/승수/WPM랭킹 변동 없음, true: 일반전처럼 정산
+
+function randInt(min, max) {
+  return Math.floor(min + Math.random() * (max - min + 1));
+}
+
+// 봇 프로필: 실제 유저와 같은 "Player #XXXXXX" 형식의 이름 + 40~60 WPM
+function createBotProfile(humanSocket) {
+  let name;
+  let tries = 0;
+  do {
+    name = `Player #${generatePlayerCode()}`;
+  } while ((accountNames[name] || accountRatings[name] !== undefined) && ++tries < 10); // 실제 계정과 겹치지 않게
+
+  return {
+    id: `bot_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+    name,
+    avatar: ALLOWED_AVATARS[randInt(0, ALLOWED_AVATARS.length - 1)],
+    wpm: Math.round((BOT_WPM_MIN + Math.random() * (BOT_WPM_MAX - BOT_WPM_MIN)) * 10) / 10,
+    rating: Math.max(0, getRating(humanSocket.id) + randInt(-30, 30)),
+    trophies: Math.max(0, (userTrophies[humanSocket.id] || 0) + randInt(-20, 20)),
+    timer: null
+  };
+}
+
+// startMatch가 playerB로 받아도 에러가 나지 않도록, 소켓처럼 행동하는 가짜 객체
+function createBotSocket(profile) {
+  return {
+    id: profile.id,
+    connected: true,
+    isBot: true,
+    data: { playerId: null, lastText: '', roomId: null },
+    join() {}, leave() {}, emit() {}
+  };
+}
+
+// --- 대기 5초 타이머 ---
+function clearBotWait(socket) {
+  if (socket && socket.data && socket.data.botWaitTimer) {
+    clearTimeout(socket.data.botWaitTimer);
+    socket.data.botWaitTimer = null;
+  }
+}
+
+function scheduleBotMatch(socket, matchKey, mode, duration) {
+  clearBotWait(socket);
+  socket.data.botWaitTimer = setTimeout(() => {
+    socket.data.botWaitTimer = null;
+    const queue = waitingNormalPlayers[matchKey];
+    if (!socket.connected || !Array.isArray(queue)) return;
+    const idx = queue.indexOf(socket);
+    if (idx === -1) return;                 // 그 사이 진짜 유저와 매칭됐거나 취소했다면 아무것도 안 함
+    queue.splice(idx, 1);
+    if (queue.length === 0) delete waitingNormalPlayers[matchKey];
+    startBotMatch(socket, mode, duration);
+  }, BOT_WAIT_MS);
+}
+
+// --- 봇과 방 생성 ---
+function startBotMatch(humanSocket, mode, duration) {
+  const profile = createBotProfile(humanSocket);
+  const botSocket = createBotSocket(profile);
+
+  // startMatch가 읽는 값들 (경기가 끝나면 cleanupBot이 지운다)
+  userRatings[profile.id] = profile.rating;
+  userStreaks[profile.id] = 0;
+  userNames[profile.id] = profile.name;
+  userAvatars[profile.id] = profile.avatar;
+  userTrophies[profile.id] = profile.trophies;
+  userNormalWins[profile.id] = 0;
+
+  clearPracticeSession(humanSocket.id);
+  // 보상 없음이면 친선과 동일하게 처리 (isFriendly=true), 보상 있음이면 일반전
+  startMatch(humanSocket, botSocket, mode, duration, false, undefined, !BOT_MATCH_REWARDS);
+
+  const room = rooms[humanSocket.data.roomId];
+  if (!room) { cleanupBot({ bot: profile }); return; }
+  room.bot = profile;                       // 이후 START 시점에 타이핑이 시작된다
+}
+
+// --- 봇 타이핑 (START 신호 직후 호출됨) ---
+function startBotTyping(roomId) {
+  const room = rooms[roomId];
+  if (!room || !room.bot || room.ended) return;
+  const bot = room.bot;
+  const botPlayer = room.players[bot.id];
+  const humanId = Object.keys(room.players).find((id) => id !== bot.id);
+  let speedMul = 1;
+  let nextDriftAt = Date.now() + 2000;
+
+  const step = () => {
+    const r = rooms[roomId];
+    if (!r || r.ended || !r.bot) { bot.timer = null; return; }   // 방이 끝났으면 체인을 끊는다
+
+    // 2~3초마다 속도를 ±15% 정도 흔든다
+    if (Date.now() >= nextDriftAt) {
+      speedMul = 0.85 + Math.random() * 0.3;
+      nextDriftAt = Date.now() + 1500 + Math.random() * 2000;
+    }
+
+    // 글자 하나당 기본 간격 = 60000 / (WPM * 5) ms, 여기에 랜덤 흔들림
+    let delay = (60000 / (bot.wpm * 5)) / speedMul * (0.7 + Math.random() * 0.6);
+
+    if (Math.random() < BOT_TYPO_RATE) {
+      // 오타 후 정정: 위치는 그대로, 시간만 쓰고 타수/오류만 올라간다
+      botPlayer.totalTyped += 2;
+      botPlayer.totalErrors += 1;
+      delay += 150 + Math.random() * 250;
+    } else {
+      botPlayer.charIndex = Math.min(r.text.length, botPlayer.charIndex + 1);
+      botPlayer.totalTyped += 1;
+    }
+
+    botPlayer.netCorrect = botPlayer.charIndex;     // 봇은 항상 정타 위치에만 서 있다
+    botPlayer.percent = Math.min(100, Math.floor((botPlayer.charIndex / r.text.length) * 100));
+    botPlayer.accuracy = botPlayer.totalTyped > 0
+      ? Math.max(0, Math.round(((botPlayer.totalTyped - botPlayer.totalErrors) / botPlayer.totalTyped) * 100))
+      : 100;
+
+    // 진짜 유저의 progress 이벤트와 같은 모양으로 사람에게 보낸다
+    io.to(humanId).emit('opponentProgress', {
+      percent: botPlayer.percent,
+      accuracy: botPlayer.accuracy,
+      charIndex: botPlayer.charIndex,
+      netCorrect: botPlayer.netCorrect,
+      totalTyped: botPlayer.totalTyped,
+      totalErrors: botPlayer.totalErrors
+    });
+
+    if (botPlayer.charIndex >= r.text.length) {     // 봇이 끝까지 쳤다면 (사실상 거의 없음)
+      botPlayer.finished = true;
+      botPlayer.finishTime = Date.now();
+      bot.timer = null;
+      endGame(roomId, bot.id);
+      return;
+    }
+    bot.timer = setTimeout(step, delay);
+  };
+
+  bot.timer = setTimeout(step, 300 + Math.random() * 500);   // 첫 글자까지의 반응 시간
+}
+
+// --- 정리: 타이머 + 봇용 메모리 값 ---
+function cleanupBot(room) {
+  const bot = room && room.bot;
+  if (!bot) return;
+  if (bot.timer) { clearTimeout(bot.timer); bot.timer = null; }
+  delete userRatings[bot.id];
+  delete userStreaks[bot.id];
+  delete userNames[bot.id];
+  delete userAvatars[bot.id];
+  delete userTrophies[bot.id];
+  delete userNormalWins[bot.id];
+  room.bot = null;
+}
+
 function removeFromWaitingQueues(socket) {
+  clearBotWait(socket);
   delete soloPracticeSessions[socket.id];
   Object.keys(waitingNormalPlayers).forEach((k) => {
     if (!Array.isArray(waitingNormalPlayers[k])) return;
     waitingNormalPlayers[k] = waitingNormalPlayers[k].filter((s) => s !== socket);
     if (waitingNormalPlayers[k].length === 0) delete waitingNormalPlayers[k];
   });
-  // 랭크 대기열에 같은 소켓이 중복으로 들어가 있어도 전부 제거한다.
   for (let i = waitingRankedPlayers.length - 1; i >= 0; i--) {
     if (waitingRankedPlayers[i].socket === socket) waitingRankedPlayers.splice(i, 1);
   }
@@ -767,9 +893,8 @@ function clearPracticeSession(socketId) {
   delete soloPracticeSessions[socketId];
 }
 
-// 클라이언트가 보내는 playerId를 검증/정규화한다.
-// "Player #XXXXXX" 형태와 순수 6자리 코드("XXXXXX") 형태 모두 허용하고,
-// 항상 "Player #XXXXXX" (대문자 코드) 표준 형태로 통일해서 반환한다.
+// Validates / normalizes the playerId sent by the client.
+// Accepts "Player #XXXXXX" and a bare 6-character code, and always returns "Player #XXXXXX" (uppercase).
 function sanitizePlayerId(raw) {
   if (typeof raw !== 'string') return null;
   const id = raw.trim();
@@ -830,16 +955,14 @@ function createEmptyPlayerState() {
     percent: 0, accuracy: 100, charIndex: 0, finished: false, finishTime: null,
     netCorrect: 0, totalTyped: 0, totalErrors: 0,
     // --- Anti-Cheat ---
-    deltaHistory: [],   // 최근 keystroke 간격(ms) 기록 (서버 메모리에만 보관, 검증용)
-    fastStreak: 0,      // 연속으로 임계치 미만 간격이 발생한 횟수
+    deltaHistory: [],
+    fastStreak: 0,
     disqualified: false
   };
 }
 
-// ★ [v15] 현재 화면에 입력되어 있는 문자열(typed)에서 "실제로 올바른 위치에 올바른 글자로" 놓여 있는 글자 수를 센다.
-//   - 과거에 맞게 쳤다가 지운(Backspace) 글자는 typed에 남아 있지 않으므로 절대 포함되지 않는다.
-//   - 오타로 덮어쓴 자리는 typed[i] !== text[i] 이므로 포함되지 않는다.
-//   - text 길이를 넘어선 입력은 무시한다.
+// Counts characters in `typed` that currently sit in the right position with the right letter.
+// Characters typed correctly and then erased (Backspace) are not in `typed`, so they never count.
 function countCurrentCorrectChars(typed, text) {
   const limit = Math.min(typed.length, text.length);
   let correct = 0;
@@ -849,10 +972,9 @@ function countCurrentCorrectChars(typed, text) {
   return correct;
 }
 
-// ★ [v15] sanitizeStat: 이제 sampleText(문자열 전체)를 받는다.
-//   - data.typed(문자열)가 있으면: charIndex / netCorrect를 서버가 직접 계산 (클라이언트가 보낸 값은 무시)
-//   - data.typed가 없으면: 구버전 호환용으로 클라이언트가 보낸 charIndex / netCorrect 사용 (REQUIRE_TYPED_SNAPSHOT=false일 때만)
-//   - totalTyped / totalErrors / accuracy 는 "누적 통계"이므로 기존대로 클라이언트 값을 사용 (Net Chars 점수와는 무관)
+// If data.typed (string) exists, the server computes charIndex / netCorrect itself.
+// Otherwise (legacy clients, only when REQUIRE_TYPED_SNAPSHOT=false) the client-sent values are used.
+// totalTyped / totalErrors / accuracy are cumulative stats and come from the client.
 function sanitizeStat(data, sampleText) {
   const sampleTextLength = sampleText.length;
   const accuracy = Number.isFinite(data.accuracy) ? Math.max(0, Math.min(100, data.accuracy)) : 100;
@@ -860,7 +982,7 @@ function sanitizeStat(data, sampleText) {
   const totalErrors = Number.isFinite(data.totalErrors) ? Math.max(0, Math.floor(data.totalErrors)) : 0;
 
   if (typeof data.typed === 'string') {
-    const typed = data.typed.slice(0, sampleTextLength); // 비정상적으로 긴 문자열 방어
+    const typed = data.typed.slice(0, sampleTextLength);
     return {
       accuracy,
       charIndex: typed.length,
@@ -878,13 +1000,11 @@ function sanitizeStat(data, sampleText) {
   return { accuracy, charIndex, netCorrect, totalTyped, totalErrors, hasTypedSnapshot: false };
 }
 
-// 클라이언트가 보낸 keystroke 간격(ms) 배치를 플레이어 상태에 반영한다.
-// 개수/값 범위를 서버에서 재검증해 비정상적으로 큰 배열이나 음수·과대값 주입을 막는다.
 function recordAntiCheatDeltas(player, rawDeltas) {
   if (!Array.isArray(rawDeltas)) return;
   const clean = rawDeltas
     .filter((d) => Number.isFinite(d) && d >= 0 && d < 10000)
-    .slice(0, 50); // 한 번에 비정상적으로 큰 배열을 보내는 것 자체도 조작 신호이므로 상한
+    .slice(0, 50);
 
   clean.forEach((delta) => {
     player.deltaHistory.push(delta);
@@ -893,7 +1013,6 @@ function recordAntiCheatDeltas(player, rawDeltas) {
   });
 }
 
-// 매크로/오토핫키형 패턴 감지: (1) 연속 초단타, (2) 사람이 치기 힘든 수준의 균일(정속) 타건
 function detectMacroPattern(player) {
   if (player.fastStreak >= ANTICHEAT_MIN_INTERVAL_STRIKE_COUNT) {
     return 'MACRO_MIN_INTERVAL';
@@ -913,7 +1032,6 @@ function detectMacroPattern(player) {
   return null;
 }
 
-// 지속 최고 속도(WPM) 제한 감지 — START 신호를 보낸 시각(room.startTime) 기준 누적 타수로 계산.
 function detectSpeedLimit(player, room) {
   if (!room.started || !Number.isFinite(room.startTime)) return null;
   if (player.totalTyped < ANTICHEAT_MAX_WPM_MIN_CHARS) return null;
@@ -924,9 +1042,8 @@ function detectSpeedLimit(player, room) {
   return wpm >= ANTICHEAT_MAX_WPM ? 'SPEED_LIMIT_EXCEEDED' : null;
 }
 
-// 감지된 부정행위자를 즉시 몰수패 처리한다. endGame을 그대로 재사용하므로
-// 상대는 (Casual이면 트로피/정상승수, Ranked라면 MMR)까지 일반 승리와 동일하게 정산된다.
-// (친선 매치는 endGame 안에서 어떤 보상도 정산되지 않는다.)
+// Disqualifies a detected cheater immediately. Reuses endGame, so the opponent is settled like a normal win
+// (Friendly matches settle nothing inside endGame).
 function disqualifyPlayer(roomId, cheaterId, reasonCode) {
   const room = rooms[roomId];
   if (!room || room.ended) return;
@@ -936,11 +1053,10 @@ function disqualifyPlayer(roomId, cheaterId, reasonCode) {
 }
 
 // ============================================================
-// ★ 서버 주도 카운트다운
-//   - 방 안의 "두 플레이어 소켓"에게만 직접 emit 한다.
-//     (io.to(roomId)를 쓰면 커스텀룸 코드가 재사용될 때 이전 경기 소켓이 섞일 수 있음)
-//   - 1초 간격으로 { value: 3 } -> { value: 2 } -> { value: 1 } -> { value: 'START' }
-//   - START를 보내는 그 시점에 room.started = true, room.startTime 기록, 종료 타이머 시작.
+// Server-driven countdown
+//   - Emits directly to the two player sockets only (io.to(roomId) could mix in old sockets if a code is reused).
+//   - { value: 3 } -> { value: 2 } -> { value: 1 } -> { value: 'START' }, one per second.
+//   - At START: room.started = true, room.startTime recorded, end timer begins.
 // ============================================================
 function emitToRoomPlayers(room, event, payload) {
   Object.keys(room.players).forEach((id) => {
@@ -976,22 +1092,19 @@ function runServerCountdown(roomId) {
       return;
     }
 
-    // ★ START — 양쪽 클라이언트가 동시에 입력창을 열고 타이머를 시작한다.
     stopCountdown(r);
     r.started = true;
-    r.startTime = Date.now(); // 서버 내부 기록용 (Anti-Cheat WPM 계산에만 사용)
+    r.startTime = Date.now();
     emitToRoomPlayers(r, 'countdownTick', { value: 'START' });
 
-    // 종료 타이머는 START 시점부터 duration 만큼
     r.endTimeoutId = setTimeout(() => endGame(roomId, undefined), r.duration * 1000);
+    if (r.bot) startBotTyping(roomId);   // 카운트다운이 끝나는 순간 봇도 같이 출발
   }, COUNTDOWN_TICK_MS);
 }
 
-// isFriendly: true면 친선(커스텀 룸 / 친선 재경기) 매치. 트로피·MMR·연승·일반전 승수 모두 변동 없음.
+// isFriendly: true for friendly (custom room / friendly rematch) matches. No trophy / MMR / streak / win-count changes.
 function startMatch(playerA, playerB, mode, duration, isRanked, customRoomId, isFriendly) {
-  // ★ 친선 여부는 오직 boolean true만 인정한다.
   isFriendly = isFriendly === true;
-  // ★ 랭크 여부를 엄격한 boolean으로 고정한다. (true 외에는 전부 Casual) 친선은 무조건 Ranked 아님.
   isRanked = isFriendly ? false : isRankedFlag(isRanked);
 
   const roomId = customRoomId || `room_${playerA.id}_${playerB.id}_${Date.now()}`;
@@ -1011,14 +1124,13 @@ function startMatch(playerA, playerB, mode, duration, isRanked, customRoomId, is
 
   rooms[roomId] = {
     mode, text, duration, isRanked,
-    isFriendly,              // ★ 친선(연습) 매치: 트로피/MMR/승수 일절 변동 없음 (서버 내부 전용)
+    isFriendly,
     invalidated,
-    started: false,          // ★ START 신호 전송 후 true
-    startTime: null,         // ★ START 신호 전송 시각 (서버 내부용)
+    started: false,
+    startTime: null,
     countdownTimerId: null,
     endTimeoutId: null, ended: false, players: {},
-    // ★ 소켓이 이미 끊긴 뒤에 endGame이 호출돼도(이탈 몰수패) 계정에 MMR/연승/트로피를 저장할 수 있도록
-    //   매치 시작 시점의 { socketId: playerId } 를 방에 보관해 둔다.
+    // Keep { socketId: playerId } so MMR / streak / trophies can still be saved if a socket disconnects before endGame.
     accountIds: {
       [playerA.id]: (playerA.data && playerA.data.playerId) || null,
       [playerB.id]: (playerB.data && playerB.data.playerId) || null
@@ -1037,13 +1149,12 @@ function startMatch(playerA, playerB, mode, duration, isRanked, customRoomId, is
   const tierB = getTierInfo(ratingB);
   const trophiesA = userTrophies[playerA.id] || 0;
   const trophiesB = userTrophies[playerB.id] || 0;
-  // 매치 시작 시점 기준 전역 순위 (100위 밖이면 null)
+  // Global rank at match start (null if outside the top 100)
   const rankA = getPlayerRankInfo(playerA.id, isRanked ? 'rating' : 'trophy');
   const rankB = getPlayerRankInfo(playerB.id, isRanked ? 'rating' : 'trophy');
 
-  // ★ gameStart는 "셋업" 신호다. startTime은 더 이상 보내지 않는다.
-  //   실제 시작 시점은 이후 countdownTick의 'START'가 결정한다.
-  // ★ [v19] 친선도 클라이언트에는 "일반전(Casual)"으로만 보인다. isFriendly는 서버 내부 전용이며 클라이언트로 보내지 않는다.
+  // gameStart is a setup signal. The real start time comes from countdownTick 'START'.
+  // Friendly matches look like Casual to clients; isFriendly is server-internal and never sent.
   const basePayload = {
     roomId,
     mode, text,
@@ -1063,7 +1174,6 @@ function startMatch(playerA, playerB, mode, duration, isRanked, customRoomId, is
     opponentName: nameA, opponentRating: ratingA, opponentTier: tierA, opponentAvatar: avatarA, opponentTrophies: trophiesA, opponentRank: rankA, opponentStreak: getStreak(playerA.id)
   });
 
-  // ★ 서버가 1초 간격으로 3 -> 2 -> 1 -> START 방송
   runServerCountdown(roomId);
 }
 
@@ -1072,19 +1182,16 @@ function endGame(roomId, forcedWinnerId, options = {}) {
   if (!room || room.ended) return;
   room.ended = true;
   clearTimeout(room.endTimeoutId);
-  stopCountdown(room); // ★ 카운트다운 도중 종료(이탈 등)되면 틱 방송을 멈춘다
-  const reason = options.reason || null; // 'forfeit', 'cheat_detected' 등 — 클라이언트에 전달
+  stopCountdown(room);
+  const reason = options.reason || null; // 'forfeit', 'cheat_detected', etc. - passed to clients
   const cheatReason = options.cheatReason || null;
   const cheaterId = options.cheaterId || null;
 
-  // ★ 이 판이 Ranked인지 / 친선인지 / 일반전(Casual)인지 판정한다.
-  //   - 친선(커스텀 룸): 트로피·MMR·연승·일반전 승수 전부 변동 없음 (순수 연습)
   const isRankedMatch = isRankedFlag(room.isRanked);
   const isFriendlyMatch = room.isFriendly === true;
   const isCasualMatch = !isRankedMatch && !isFriendlyMatch;
 
-  // ★ MMR/연승 변동 적용 여부: Ranked는 항상, Casual은 CASUAL_MMR_ENABLED가 true일 때만. 친선은 절대 아님.
-  //   트로피는 이 값과 무관하게 Casual에서만 정산된다. (Ranked/친선은 트로피 변동 없음)
+  // MMR / streak apply to Ranked always, to Casual only if CASUAL_MMR_ENABLED, and never to Friendly.
   const mmrApplies = !isFriendlyMatch && (isRankedMatch || CASUAL_MMR_ENABLED);
 
   const ids = Object.keys(room.players);
@@ -1095,8 +1202,7 @@ function endGame(roomId, forcedWinnerId, options = {}) {
     const p1 = room.players[id1];
     const p2 = room.players[id2];
 
-    // ★ [v15] netCorrect는 progress 수신 시점마다 "현재 화면 기준"으로 재계산된 값이다.
-    //   (누적 정타 수가 아니므로, 지웠다가 틀리게 고친 글자는 여기에 반영되지 않는다.)
+    // netCorrect is recomputed from the on-screen text at every progress event (not cumulative).
     const nc1 = Number.isFinite(p1.netCorrect) ? p1.netCorrect : 0;
     const nc2 = Number.isFinite(p2.netCorrect) ? p2.netCorrect : 0;
 
@@ -1120,8 +1226,7 @@ function endGame(roomId, forcedWinnerId, options = {}) {
     }
   }
 
-  // --- MMR(레이팅) + 연승 정산: Ranked 전용 (CASUAL_MMR_ENABLED=true면 Casual도 포함) ---
-  //   mmrResults[id] = 클라이언트에 내려줄 "완결된" 결과 (변동 없음이면 diff 0 / streak는 현재값)
+  // --- MMR + streak settlement ---
   const ratingChanges = {};
   const mmrResults = {};
   if (mmrApplies) {
@@ -1133,10 +1238,8 @@ function endGame(roomId, forcedWinnerId, options = {}) {
     if (!room.invalidated && winnerId !== null) {
       const loserId = ids.find((id) => id !== winnerId);
 
-      // 점수차 = 두 플레이어 netCorrect(순 정타 글자 수) 차이
       const scoreOf = (pid) => (Number.isFinite(room.players[pid].netCorrect) ? room.players[pid].netCorrect : 0);
       const scoreMargin = Math.abs(scoreOf(winnerId) - scoreOf(loserId));
-      // 기권/이탈/부정행위 실격으로 끝난 판은 "기권승/기권패"로 취급
       const isNoContest = reason === 'forfeit' || reason === 'cheat_detected';
 
       const oldWinner = getRating(winnerId);
@@ -1152,14 +1255,14 @@ function endGame(roomId, forcedWinnerId, options = {}) {
       userRatings[winnerId] = calc.winner.newRating;
       userRatings[loserId] = calc.loser.newRating;
       userStreaks[winnerId] = calc.winner.newStreak;
-      userStreaks[loserId] = 0; // 패배/기권 시 연승 리셋
+      userStreaks[loserId] = 0;
 
       mmrResults[winnerId] = {
         old: oldWinner, new: calc.winner.newRating, diff: calc.winner.newRating - oldWinner,
         baseChange: calc.winner.baseChange, streakBonus: calc.winner.streakBonus, streak: calc.winner.newStreak
       };
       mmrResults[loserId] = {
-        old: oldLoser, new: calc.loser.newRating, diff: calc.loser.newRating - oldLoser, // 0점 하한이 걸리면 실제 반영값
+        old: oldLoser, new: calc.loser.newRating, diff: calc.loser.newRating - oldLoser,
         baseChange: calc.loser.baseChange, streakBonus: 0, streak: 0
       };
     }
@@ -1170,25 +1273,18 @@ function endGame(roomId, forcedWinnerId, options = {}) {
     });
   }
 
-  // --- 일반전 승수(랭크 해금용): Casual에서만 카운트. (친선/Ranked는 제외) ---
+  // --- Casual win count (for the Ranked unlock): Casual only ---
   let winnerUnlock = null;
   if (isCasualMatch && !room.invalidated && winnerId !== null) {
     const winnerSocket = io.sockets.sockets.get(winnerId);
     if (winnerSocket) winnerUnlock = addNormalWin(winnerSocket);
   }
 
-  // --- 트로피 정산: ★ Casual(일반전) 전용. Ranked/친선은 트로피가 절대 변동하지 않는다. ---
-  //   - Casual: 승 +10 / 패 0 / 무 0 (getCasualTrophyChange)
-  //   - Ranked: 승/패/무 모두 0 (MMR/연승만 변동)
-  //   - 친선: 승/패/무/기권 모두 0, 저장/이벤트 전송도 하지 않는다 (기존 데이터 보호)
-  //           → 결과 화면에는 { old, new: old, diff: 0 } 이 내려가서 "+0 Trophies (Total 현재값)"으로 표시된다.
-  //   - 0 미만으로 내려가지 않도록 하한 처리 (diff는 실제로 반영된 값 기준)
-  //   - 같은 계정끼리 붙은 판(invalidated)은 보상 무효 (diff 0)
+  // --- Trophy settlement: Casual only. Ranked / Friendly never change trophies. ---
   const trophyChanges = {};
   ids.forEach((id) => {
     const oldTrophies = userTrophies[id] || 0;
 
-    // ★ 친선: 트로피 값 / 계정 저장 / trophyUpdate 이벤트 모두 건드리지 않는다.
     if (isFriendlyMatch) {
       trophyChanges[id] = { old: oldTrophies, new: oldTrophies, diff: 0 };
       return;
@@ -1206,10 +1302,9 @@ function endGame(roomId, forcedWinnerId, options = {}) {
     const playerSocketForTrophy = io.sockets.sockets.get(id);
     if (playerSocketForTrophy) {
       persistTrophies(playerSocketForTrophy);
-      // 결과 화면 외의 UI(로비 헤더 등)도 즉시 최신 트로피로 갱신되도록 별도 이벤트도 보낸다.
       playerSocketForTrophy.emit('trophyUpdate', { trophies: newTrophies });
     } else {
-      // 이탈(disconnect)로 소켓이 이미 사라진 경우에도 계정에는 반드시 저장한다.
+      // Even if the socket is gone (disconnect), always save to the account.
       const pid = room.accountIds && room.accountIds[id];
       if (pid) {
         accountTrophies[pid] = newTrophies;
@@ -1219,9 +1314,7 @@ function endGame(roomId, forcedWinnerId, options = {}) {
   });
   if (room.invalidated) console.log(`[Anti-Abuse] Match rewards invalidated: ${roomId}`);
 
-  // MMR/연승 영구 저장: MMR이 적용된 판에서만 수행한다.
-  //   소켓이 이미 끊긴 이탈자(패자)도 저장되도록 room.accountIds(playerId)를 기준으로 기록한다.
-  //   (이걸 소켓 기준으로만 저장하면, 지고 나서 튕기는 방식으로 MMR 하락/연승 리셋을 피할 수 있다)
+  // Persist MMR / streak by playerId so a player who leaves after losing still takes the MMR loss / streak reset.
   if (mmrApplies) {
     ids.forEach((id) => {
       const sock = io.sockets.sockets.get(id);
@@ -1233,7 +1326,6 @@ function endGame(roomId, forcedWinnerId, options = {}) {
     });
   }
 
-  // [진단 로그] 이 판이 Ranked/친선이었는지, 트로피/MMR 변동이 얼마였는지 서버 콘솔에서 바로 확인할 수 있다.
   console.log(`[EndGame] room=${roomId} isRanked=${isRankedMatch} isFriendly=${isFriendlyMatch} invalidated=${!!room.invalidated} reason=${reason} netCorrect=${JSON.stringify(Object.fromEntries(ids.map((id) => [id, room.players[id].netCorrect])))} trophyDiffs=${JSON.stringify(Object.fromEntries(ids.map((id) => [id, trophyChanges[id] ? trophyChanges[id].diff : null])))} mmr=${mmrApplies ? JSON.stringify(Object.fromEntries(ids.map((id) => [id, { diff: mmrResults[id].diff, streak: mmrResults[id].streak, bonus: mmrResults[id].streakBonus }]))) : 'n/a'}`);
 
   ids.forEach((id) => {
@@ -1243,7 +1335,6 @@ function endGame(roomId, forcedWinnerId, options = {}) {
     const oppPlayerId = oppSocket && oppSocket.data ? oppSocket.data.playerId : null;
     const mmrRes = mmrApplies ? mmrResults[id] : null;
 
-    // ★ [v19] 친선은 무조건 0 / 기존 트로피 그대로. 값 자체를 여기서 한 번 더 고정한다.
     const tc = trophyChanges[id];
     const sentTrophyChange = isFriendlyMatch ? 0 : tc.diff;
     const sentTotalTrophies = isFriendlyMatch ? tc.old : tc.new;
@@ -1252,24 +1343,21 @@ function endGame(roomId, forcedWinnerId, options = {}) {
       result: winnerId === null ? 'draw' : (winnerId === id ? 'win' : 'lose'),
       myStats: room.players[id],
       opponentStats: room.players[oppId],
-      // MMR이 적용되지 않은 판(기본 설정의 Casual, 친선)은 ratingData가 null (기존 클라이언트 호환용 { old, new, diff })
       ratingData: mmrRes ? (ratingChanges[id] || null) : null,
-      // ★ 완결된 MMR 변동량 + 연승 상태 (Ranked 전용, Casual/친선이면 mmrChange 0 / mmrData null)
       mmrApplied: !!mmrRes,
-      mmrChange: mmrRes ? mmrRes.diff : 0,            // 실제 반영된 MMR 변동량 (+15, -10, +30 ...)
+      mmrChange: mmrRes ? mmrRes.diff : 0,
       mmrData: mmrRes ? {
         old: mmrRes.old,
         new: mmrRes.new,
         diff: mmrRes.diff,
-        baseChange: mmrRes.baseChange,                // 연승 보너스를 제외한 기본 승패 점수
-        streakBonus: mmrRes.streakBonus               // 이번 판에 붙은 연승 보너스 (0 / +2 ~ +16)
+        baseChange: mmrRes.baseChange,
+        streakBonus: mmrRes.streakBonus
       } : null,
-      streak: mmrRes ? mmrRes.streak : getStreak(id), // 이 판 이후의 현재 Ranked 연승 수 (패배 시 0)
-      streakBonus: mmrRes ? mmrRes.streakBonus : 0,   // MMR 연승 보너스 (Ranked 전용)
-      // ★ 트로피 데이터는 항상 내려가지만, Ranked/친선 판에서는 diff가 항상 0이다: { old, new, diff }
+      streak: mmrRes ? mmrRes.streak : getStreak(id),
+      streakBonus: mmrRes ? mmrRes.streakBonus : 0,
       trophyData: { old: tc.old, new: sentTotalTrophies, diff: sentTrophyChange },
-      trophyChange: sentTrophyChange,         // 친선: 항상 0 (Casual: +10 / 0, Ranked: 0)
-      totalTrophies: sentTotalTrophies,       // 친선: 기존 트로피 그대로
+      trophyChange: sentTrophyChange,
+      totalTrophies: sentTotalTrophies,
       unlock: playerSocket ? unlockPayload(playerSocket) : null,
       justUnlocked: !!(winnerUnlock && winnerId === id && winnerUnlock.justUnlocked),
       invalidated: !!room.invalidated,
@@ -1279,16 +1367,14 @@ function endGame(roomId, forcedWinnerId, options = {}) {
       cheatReason: cheatReason,
       disqualified: cheaterId === id,
       roomId: roomId,
-      isRanked: isRankedMatch,                // 친선: 항상 false
-      isCasual: !isRankedMatch,               // 친선도 일반전과 같은 결과 화면
-      // ★ [v19] isFriendly 는 클라이언트로 보내지 않는다 (UI 분기 원천 차단). 재경기 판정은 recentMatches 에서 서버가 처리.
-      showRecord: true                        // WIN / LOSE 및 Trophies 줄을 항상 표시
+      isRanked: isRankedMatch,
+      isCasual: !isRankedMatch,
+      showRecord: true
     });
   });
 
-  // ★ [랭킹 등록 대기] 서버가 가진 값만으로 이 판의 기록(WPM)을 계산해 소켓에 1회용으로 보관한다.
-  //   - 친선 / 같은 계정 매치 / 기권·이탈·부정행위 종료 / START 이전 종료는 등록 대상이 아니다.
-  //   - 클라이언트는 이후 'submitRank' 로 roomId + deltas(키 간격 배열)만 보낸다. WPM은 클라이언트 값을 쓰지 않는다.
+  // Leaderboard submission: the server computes this match's WPM itself and stores it on the socket (single use).
+  // Not eligible: Friendly, same-account, forfeit / disconnect / cheat endings, or ending before START.
   ids.forEach((id) => {
     const s = io.sockets.sockets.get(id);
     if (!s || !s.data) return;
@@ -1311,27 +1397,27 @@ function endGame(roomId, forcedWinnerId, options = {}) {
       elapsedMs,
       totalTyped: p.totalTyped,
       accuracy: p.accuracy,
-      wpm: Math.round(((netCorrect / 5) / minutes) * 10) / 10,          // 순 WPM (정타 기준)
-      grossWpm: Math.round(((p.totalTyped / 5) / minutes) * 10) / 10,   // 총 타수 기준 WPM (검증용)
+      wpm: Math.round(((netCorrect / 5) / minutes) * 10) / 10,
+      grossWpm: Math.round(((p.totalTyped / 5) / minutes) * 10) / 10,
       createdAt: Date.now()
     };
   });
-  scheduleRanksSave(); // 이번 판의 MMR/트로피/승수 변동을 ranks.json에 반영
+  scheduleRanksSave();
 
-  // ★ [v17] 끝난 방의 roomId가 소켓에 남아 다른 판(재사용된 방 ID 등)과 엮이지 않도록 정리한다.
+  // Clear the finished roomId from sockets so a reused room ID is never mixed up with another match.
   ids.forEach((id) => {
     const s = io.sockets.sockets.get(id);
     if (s && s.data && s.data.roomId === roomId) s.data.roomId = null;
   });
 
-  // 재경기 요청을 위해 방금 끝난 매치업 정보를 잠시 보관한다 (양쪽 모두 연결 상태일 때만).
+  // Keep the matchup briefly for rematch requests (only if both are still connected).
   if (ids.every((id) => { const s = io.sockets.sockets.get(id); return s && s.connected; })) {
     recentMatches[roomId] = { playerIds: ids.slice(), mode: room.mode, duration: room.duration, isRanked: isRankedMatch, isFriendly: isFriendlyMatch };
     setTimeout(() => { delete recentMatches[roomId]; }, RECENT_MATCH_TTL_MS);
   }
 
-  // ★ [신고] 이 판의 참가자(playerId)를 신고 가능 목록에 등록한다. (종료 후 10분)
-  //   신고 대상은 클라이언트가 보낸 값이 아니라 여기 기록된 "상대 계정"으로 서버가 결정한다.
+  // Register participants as reportable for 10 minutes (Friendly matches cannot be reported).
+  // The report target is decided here by the server (the opponent account), never by the client.
   {
     const players = {};
     ids.forEach((id) => {
@@ -1344,6 +1430,7 @@ function endGame(roomId, forcedWinnerId, options = {}) {
     }
   }
 
+  cleanupBot(room);   // 봇 타이머 + 봇용 메모리 정리 (결과 전송이 다 끝난 뒤에 해야 상대 이름이 나간다)
   delete rooms[roomId];
 }
 
@@ -1352,9 +1439,9 @@ function sendInitUser(socket) {
   const baseName = (userNames[socket.id] || '').replace(/\[[^\]]*\]\s*/g, '').trim();
   userNames[socket.id] = appendDynamicTag(baseName, rankTag);
   socket.emit('initUser', {
-    playerId: socket.data.playerId || null, // 클라이언트가 localStorage에 그대로 저장할 확정 ID
+    playerId: socket.data.playerId || null,
     rating: getRating(socket.id),
-    streak: getStreak(socket.id),           // 현재 Ranked 연승 수
+    streak: getStreak(socket.id),
     trophies: userTrophies[socket.id],
     name: userNames[socket.id],
     avatar: userAvatars[socket.id],
@@ -1378,8 +1465,7 @@ io.on('connection', (socket) => {
 
   sendInitUser(socket);
 
-  // 클라이언트가 playerId를 보내면 기존 계정 데이터 복구 + 닉네임 재전송.
-  // playerId가 없거나 유효하지 않으면 서버가 새로 발급해서 클라이언트에 내려준다.
+  // The client sends its playerId to restore account data. If missing / invalid, the server issues a new one.
   socket.on('identify', (data) => {
     data = data || {};
     let playerId = sanitizePlayerId(data.playerId);
@@ -1389,7 +1475,7 @@ io.on('connection', (socket) => {
     }
     socket.data.playerId = playerId;
 
-    // 동일 계정 중복 접속 차단: 먼저 접속해 있던 세션을 강제 종료(Kick)한다.
+    // Block duplicate logins: kick the earlier session.
     const existingSocketId = playerIdToSocket[playerId];
     if (existingSocketId && existingSocketId !== socket.id) {
       const existingSocket = io.sockets.sockets.get(existingSocketId);
@@ -1402,12 +1488,10 @@ io.on('connection', (socket) => {
     playerIdToSocket[playerId] = socket.id;
 
     userNormalWins[socket.id] = accountNormalWins[playerId] || 0;
-    // MMR이 0점이어도 falsy로 취급되어 1000으로 되돌아가지 않도록 Number.isFinite로 판정한다.
     userRatings[socket.id] = Number.isFinite(accountRatings[playerId]) ? accountRatings[playerId] : getRating(socket.id);
     userStreaks[socket.id] = Number.isFinite(accountStreaks[playerId]) ? accountStreaks[playerId] : 0;
     userTrophies[socket.id] = accountTrophies[playerId] || 0;
 
-    // 기존 닉네임이 있으면 복구. 없으면 playerId 자체를 표시 닉네임으로 사용한다.
     if (accountNames[playerId]) {
       userNames[socket.id] = accountNames[playerId];
     } else {
@@ -1416,7 +1500,6 @@ io.on('connection', (socket) => {
       userNames[socket.id] = nick;
     }
 
-    // 랭킹 태그 재생성 + playerId 포함해서 클라이언트에 전달
     sendInitUser(socket);
     socket.emit('unlockStatus', unlockPayload(socket));
     socket.emit('trophyUpdate', { trophies: userTrophies[socket.id] });
@@ -1424,10 +1507,8 @@ io.on('connection', (socket) => {
 
   socket.on('selectMode', (data) => {
     data = data || {};
-    // ★ 기존 대기 흔적 제거: 취소 없이 다시 선택하거나 연타해도 같은 소켓이 큐에 중복 등록되지 않는다.
     removeFromWaitingQueues(socket);
 
-    // ★ 오직 boolean true 만 Ranked. 그 외 값(문자열 "false", 1, undefined 등)은 전부 Casual.
     const isRanked = isRankedFlag(data.isRanked);
     const mode = 'time';
     const duration = ALLOWED_TIME_DURATIONS.includes(data.duration) ? data.duration : DEFAULT_TIME_DURATION;
@@ -1472,18 +1553,18 @@ io.on('connection', (socket) => {
 
       if (oppIdx > -1) {
         const [opponent] = queue.splice(oppIdx, 1);
+        clearBotWait(opponent);
         startMatch(opponent, socket, mode, duration, false);
         clearPracticeSession(socket.id);
         clearPracticeSession(opponent.id);
       } else {
         queue.push(socket);
         socket.emit('waiting', { isRanked: false });
+        scheduleBotMatch(socket, matchKey, mode, duration);
       }
     }
   });
 
-  // ★ 일반/랭크 매칭 대기 취소 (클라이언트: emit('cancelSearch'))
-  //   대기열(일반/랭크)에서 이 소켓을 완전히 제거한다.
   socket.on('cancelSearch', () => {
     removeFromWaitingQueues(socket);
     socket.emit('matchmakingCancelled');
@@ -1492,35 +1573,31 @@ io.on('connection', (socket) => {
   socket.on('progress', (data) => {
     const room = rooms[socket.data.roomId];
     if (!room || room.ended) return;
-    // ★ START 신호 전에 들어온 입력은 무시한다 (카운트다운 중 선입력/조작 방지)
+    // Ignore input before the START signal.
     if (!room.started) return;
     const player = room.players[socket.id];
     if (!player || player.finished || player.disqualified) return;
 
-    // ★ [v15] typed 스냅샷이 있으면 서버가 charIndex / netCorrect를 현재 화면 기준으로 직접 계산한다.
     const stat = sanitizeStat(data || {}, room.text);
     if (REQUIRE_TYPED_SNAPSHOT && !stat.hasTypedSnapshot) return;
 
     const { accuracy, charIndex, netCorrect, totalTyped, totalErrors } = stat;
 
-    // percent는 charIndex 기반으로 서버에서 재계산해 클라이언트 위조/오차를 방지한다.
+    // percent is recomputed on the server from charIndex.
     const percent = room.text.length > 0
       ? Math.min(100, Math.floor((charIndex / room.text.length) * 100))
       : 0;
 
     player.percent = percent;
     player.charIndex = charIndex;
-    player.netCorrect = netCorrect; // ★ [v15] 현재 화면에 올바르게 입력되어 있는 글자 수 (누적값 아님 → 감소할 수 있음)
+    player.netCorrect = netCorrect;
     player.totalTyped = totalTyped;
     player.totalErrors = totalErrors;
-    // accuracy는 서버에서 총입력/누적오류 기반으로 재계산 (오타 1회면 영구 100% 불가 반영)
     player.accuracy = totalTyped > 0
       ? Math.max(0, Math.round(((totalTyped - totalErrors) / totalTyped) * 100))
       : 100;
 
-    // --- Anti-Cheat 검증 ---
-    // 클라이언트가 보낸 keystroke 간격 배치를 반영한 뒤 매크로/정속 패턴과 지속 최고속도를 검사한다.
-    // 위반 감지 시 그 즉시 이 판을 종료하고 해당 플레이어를 몰수패 처리한다.
+    // --- Anti-Cheat ---
     recordAntiCheatDeltas(player, (data && data.deltas) || []);
     const cheatReason = detectMacroPattern(player) || detectSpeedLimit(player, room);
     if (cheatReason) {
@@ -1529,8 +1606,7 @@ io.on('connection', (socket) => {
       return;
     }
 
-    // 100% 완주 시 자동으로 playerFinished 처리
-
+    // Finishing 100% ends the match automatically.
     if (percent >= 100 && !player.finished) {
       player.finished = true;
       player.finishTime = Date.now();
@@ -1556,7 +1632,7 @@ io.on('connection', (socket) => {
     const duration = ALLOWED_TIME_DURATIONS.includes(data.duration) ? data.duration : DEFAULT_TIME_DURATION;
     let code;
     do { code = generateRoomCode(); } while (customRooms[code]);
-    // ★ 커스텀 룸은 항상 친선(연습). 클라이언트가 isRanked를 보내도 무시한다.
+    // Custom rooms are always friendly. isRanked from the client is ignored.
     customRooms[code] = { mode, duration, isRanked: false, players: [socket] };
     socket.join(code);
     socket.data.customRoomCode = code;
@@ -1586,22 +1662,19 @@ io.on('connection', (socket) => {
     socket.emit('roomJoined', { code });
     room.players[0].emit('roomOpponentJoined');
 
-    // ★ 커스텀룸도 일반 매치와 동일하게 서버 주도 카운트다운(countdownTick)을 사용한다.
-    //   기존처럼 3초를 별도로 기다린 뒤 startMatch를 호출하면 카운트다운이 이중(3초 + 3초)이 되므로,
-    //   여기서는 화면 전환 신호만 보내고 즉시 매치를 시작한다.
+    // Custom rooms use the same server-driven countdown. Only a screen-switch signal is sent here,
+    // and the match starts immediately (otherwise the countdown would run twice).
     io.to(code).emit('customRoomCountdown', { seconds: COUNTDOWN_SECONDS });
 
     const [host, guest] = customRooms[code].players;
     delete customRooms[code];
-    // ★ [v17] 방 코드를 그대로 roomId로 쓰면 코드가 재사용될 때 이전 판 소켓/재경기/신고 기록과 섞일 수 있다.
-    //   → 매 판마다 고유한 roomId를 사용한다. (방 코드는 대기실 용도로만 쓰인다)
+    // Use a unique roomId per match so a reused room code never mixes with old sockets / rematches / reports.
     const friendlyRoomId = `friendly_${code}_${Date.now()}`;
     host.leave(code);
     guest.leave(code);
     host.data.customRoomCode = null;
     guest.data.customRoomCode = null;
-    // ★ 커스텀 룸은 친선(연습) 매치: isRanked=false, isFriendly=true 고정
-    //   → 승/패/기권 상관없이 트로피·MMR·연승·일반전 승수 전부 변동 없음
+    // Custom rooms are friendly matches: isRanked=false, isFriendly=true
     startMatch(host, guest, room.mode, room.duration, false, friendlyRoomId, true);
   });
 
@@ -1624,7 +1697,7 @@ io.on('connection', (socket) => {
     const sortBy = data.sortBy || 'rank';
 
     const rankSortKind = sortBy === 'trophy' ? 'trophy' : 'rating';
-    const topList = buildTopRankList(rankSortKind); // ★ 계정 단위로 정렬된 리스트를 그대로 재사용
+    const topList = buildTopRankList(rankSortKind);
 
     const myId = socket.data && socket.data.playerId;
     const entries = topList.map((entry, idx) => ({
@@ -1637,7 +1710,7 @@ io.on('connection', (socket) => {
       isMe: entry.playerId === myId
     }));
 
-    // 내 계정이 상위 100위 밖이라 리스트에 없다면 별도로 채워서 내려준다(기존 동작 유지).
+    // If my account is outside the top 100, append it separately (rank: null).
     if (myId && !entries.some((e) => e.playerId === myId)) {
       entries.push({
         rank: null,
@@ -1653,26 +1726,27 @@ io.on('connection', (socket) => {
     socket.emit('leaderboardData', { sortBy, entries: entries.slice(0, 50) });
   });
 
-  // ★ 신고 접수: 클라이언트 → { roomId?: string, reason?: 'cheating' }
-  //   신고 대상은 서버가 "그 경기의 상대"로 직접 결정한다. (클라이언트가 보낸 대상 ID는 사용하지 않음)
-  //   - roomId 생략(경기 중) 시 현재 내 방을 사용한다.
-  //   - 사유는 핵/매크로 의심('cheating')으로 단일화되어 있다.
+  // Report: client -> { roomId?: string, reason?: 'cheating' }
+  // The target is always decided by the server as the opponent of that match.
   socket.on('reportMatch', (data) => {
     data = data || {};
     const reply = (payload) => socket.emit('reportResult', payload);
-    console.log(`[Reported] 요청 수신: socket=${socket.id} player=${socket.data && socket.data.playerId} roomId=${data.roomId}`);
+    console.log(`[Reported] Request received: socket=${socket.id} player=${socket.data && socket.data.playerId} roomId=${data.roomId}`);
     const reporterId = socket.data && socket.data.playerId;
 
     if (!reporterId) {
-      return reply({ success: false, code: 'NOT_IDENTIFIED', message: '접속 정보를 확인할 수 없습니다.' });
+      return reply({ success: false, code: 'NOT_IDENTIFIED', message: 'Unable to verify your connection.' });
     }
 
-    // 1) 신고할 경기 확인: 진행 중이면 현재 방, 종료됐으면 reportableMatches(10분 이내)
+    // 1) Find the match: the live room if in progress, otherwise reportableMatches (within 10 minutes)
     const roomId = (typeof data.roomId === 'string' && data.roomId) ? data.roomId : (socket.data.roomId || null);
     let participants = null; // { playerId: name }
     const liveRoom = roomId ? rooms[roomId] : null;
+    if (liveRoom && liveRoom.bot) {
+      return reply({ success: false, code: 'NO_TARGET', message: 'This match cannot be reported.' });
+    }
     if (liveRoom && liveRoom.isFriendly === true) {
-      return reply({ success: false, code: 'FRIENDLY_MATCH', message: '친선 경기는 신고할 수 없습니다.' });
+      return reply({ success: false, code: 'FRIENDLY_MATCH', message: 'Friendly matches cannot be reported.' });
     }
     if (liveRoom && liveRoom.accountIds) {
       participants = {};
@@ -1684,19 +1758,19 @@ io.on('connection', (socket) => {
     }
 
     if (!participants || !participants[reporterId]) {
-      return reply({ success: false, code: 'NO_MATCH', message: '신고할 수 있는 경기가 없습니다. (경기 종료 후 10분 이내만 가능)' });
+      return reply({ success: false, code: 'NO_MATCH', message: 'No match available to report. (Only within 10 minutes after a match ends)' });
     }
 
-    // 2) 신고 대상 = 이 경기의 상대방
+    // 2) Target = the opponent in this match
     const targetId = Object.keys(participants).find((pid) => pid !== reporterId);
     if (!targetId) {
-      return reply({ success: false, code: 'NO_TARGET', message: '신고할 상대를 찾을 수 없습니다.' });
+      return reply({ success: false, code: 'NO_TARGET', message: 'Could not find an opponent to report.' });
     }
 
-    // 3) 한 경기에서 한 명당 1회
+    // 3) One report per player per match
     if (!reportedInMatch[roomId]) reportedInMatch[roomId] = new Set();
     if (reportedInMatch[roomId].has(reporterId)) {
-      return reply({ success: false, code: 'ALREADY_REPORTED', message: '이 경기는 이미 신고했습니다.', roomId });
+      return reply({ success: false, code: 'ALREADY_REPORTED', message: 'You have already reported this match.', roomId });
     }
     reportedInMatch[roomId].add(reporterId);
 
@@ -1707,26 +1781,26 @@ io.on('connection', (socket) => {
       targetId,
       targetName: participants[targetId] || targetId,
       roomId,
-      reason: 'cheating'   // 사유는 핵/매크로 의심으로 단일화
+      reason: 'cheating'
     };
 
     reportLogs.push(reportEntry);
     if (reportLogs.length > 1000) reportLogs.shift();
 
-    // 4) 누적 집계 + [Reported] 로그
+    // 4) Aggregate + log
     const counts = registerReport(reportEntry);
-    console.log(`[Reported] ${reportEntry.reporterName}(${reporterId}) → ${reportEntry.targetName}(${targetId}) reason=cheating room=${roomId} | 누적 ${counts.total}회 (고유 신고자 ${counts.uniqueReporters.size}명)`);
+    console.log(`[Reported] ${reportEntry.reporterName}(${reporterId}) -> ${reportEntry.targetName}(${targetId}) reason=cheating room=${roomId} | total ${counts.total} (unique reporters ${counts.uniqueReporters.size})`);
     if (REPORT_ALERT_THRESHOLDS.includes(counts.total)) {
-      console.warn(`[Reported][ALERT] ${targetId} 누적 신고 ${counts.total}회 도달 (고유 신고자 ${counts.uniqueReporters.size}명) → 확인 필요`);
+      console.warn(`[Reported][ALERT] ${targetId} reached ${counts.total} total reports (unique reporters ${counts.uniqueReporters.size}) -> needs review`);
     }
 
     sendDiscordReportWebhook(reportEntry);
 
-    reply({ success: true, code: 'OK', message: '신고가 접수되었습니다.', roomId });
+    reply({ success: true, code: 'OK', message: 'Your report has been submitted.', roomId });
   });
 
-  // ★ 랭킹 기록 등록: 클라이언트 → { roomId, deltas:[ms,...] }
-  //   결과는 'rankSubmitResult' 로 { success, code, message, isNewBest, wpm, accuracy, duration } 가 내려간다.
+  // Leaderboard submission: client -> { roomId, deltas:[ms,...] }
+  // Result is sent as 'rankSubmitResult': { success, code, message, isNewBest, wpm, accuracy, duration }
   socket.on('submitRank', (data) => {
     data = data || {};
     const reply = (payload) => socket.emit('rankSubmitResult', payload);
@@ -1735,16 +1809,16 @@ io.on('connection', (socket) => {
 
     if (!pid || !pending || Date.now() - pending.createdAt > RANK_PENDING_TTL_MS) {
       socket.data.pendingRank = null;
-      return reply({ success: false, code: 'NO_PENDING', message: '등록할 수 있는 경기 기록이 없습니다.' });
+      return reply({ success: false, code: 'NO_PENDING', message: 'No match record available to submit.' });
     }
     if (data.roomId !== pending.roomId) {
-      return reply({ success: false, code: 'ROOM_MISMATCH', message: '경기 정보가 일치하지 않습니다.' });
+      return reply({ success: false, code: 'ROOM_MISMATCH', message: 'Match information does not match.' });
     }
-    socket.data.pendingRank = null; // 1회용: 성공/실패와 무관하게 재시도 불가
+    socket.data.pendingRank = null; // single use
 
     const check = validateRankSubmission(pending, data.deltas);
     if (!check.ok) {
-      console.log(`[RankSubmit] 거부: ${pid} code=${check.code} wpm=${pending.wpm} gross=${pending.grossWpm}`);
+      console.log(`[RankSubmit] Rejected: ${pid} code=${check.code} wpm=${pending.wpm} gross=${pending.grossWpm}`);
       return reply({ success: false, code: check.code, message: check.message });
     }
 
@@ -1760,10 +1834,10 @@ io.on('connection', (socket) => {
         isRanked: pending.isRanked,
         achievedAt: new Date().toISOString()
       };
-      saveRanksNow(); // 새 최고 기록은 즉시 파일에 저장
+      saveRanksNow();
     }
 
-    console.log(`[RankSubmit] 등록: ${pid} ${key}s wpm=${pending.wpm} newBest=${isNewBest}`);
+    console.log(`[RankSubmit] Accepted: ${pid} ${key}s wpm=${pending.wpm} newBest=${isNewBest}`);
     reply({
       success: true,
       isNewBest,
@@ -1774,7 +1848,7 @@ io.on('connection', (socket) => {
     });
   });
 
-  // ★ WPM 랭킹 조회: 클라이언트 → { duration: 30|60|120 }  /  응답: 'wpmLeaderboardData'
+  // WPM leaderboard query: client -> { duration: 30|60|120 }  /  response: 'wpmLeaderboardData'
   socket.on('requestWpmLeaderboard', (data) => {
     data = data || {};
     const duration = ALLOWED_TIME_DURATIONS.includes(data.duration) ? data.duration : DEFAULT_TIME_DURATION;
@@ -1785,7 +1859,7 @@ io.on('connection', (socket) => {
       .filter((r) => r.bests && r.bests[key])
       .sort((a, b) => {
         if (b.bests[key].wpm !== a.bests[key].wpm) return b.bests[key].wpm - a.bests[key].wpm;
-        return String(a.bests[key].achievedAt).localeCompare(String(b.bests[key].achievedAt)); // 동률이면 먼저 달성한 사람
+        return String(a.bests[key].achievedAt).localeCompare(String(b.bests[key].achievedAt));
       })
       .slice(0, 50)
       .map((r, i) => ({
@@ -1824,14 +1898,14 @@ io.on('connection', (socket) => {
   socket.on('leaveMatch', () => {
     const roomId = socket.data.roomId;
     const room = rooms[roomId];
-    // ★ [v17] 이 방의 참가자가 아니면(다른 판의 방 ID가 남아 있는 경우 등) 절대 처리하지 않는다.
+    // Ignore if this socket is not a participant of the room.
     if (!room || room.ended || !room.players[socket.id]) return;
     const remainingId = Object.keys(room.players).find((id) => id !== socket.id);
     if (!remainingId) return;
     endGame(roomId, remainingId, { reason: 'forfeit' });
   });
 
-  // --- 재경기(Rematch) ---
+  // --- Rematch ---
   socket.on('requestRematch', (data) => {
     data = data || {};
     const roomId = data.roomId;
@@ -1878,7 +1952,7 @@ io.on('connection', (socket) => {
       const p1 = io.sockets.sockets.get(match.playerIds[0]);
       const p2 = io.sockets.sockets.get(match.playerIds[1]);
       if (p1 && p1.connected && p2 && p2.connected) {
-        // 재경기는 직전 경기와 동일한 종류(Casual / Ranked / 친선)를 그대로 이어받는다.
+        // A rematch inherits the previous match type (Casual / Ranked / Friendly).
         startMatch(p1, p2, match.mode, match.duration, isRankedFlag(match.isRanked), undefined, match.isFriendly === true);
       } else {
         match.playerIds.forEach((id) => {
@@ -1908,7 +1982,7 @@ io.on('connection', (socket) => {
     const myPid = socket.data.playerId;
     if (myPid && playerIdToSocket[myPid] === socket.id) delete playerIdToSocket[myPid];
 
-    // 재경기 대기/제안 중이었다면 상대에게 알리고 정리한다.
+    // If a rematch was pending, notify the opponent and clean up.
     for (const [rid, match] of Object.entries(recentMatches)) {
       if (match.playerIds.includes(socket.id)) {
         const oppId = match.playerIds.find((id) => id !== socket.id);
@@ -1928,13 +2002,11 @@ io.on('connection', (socket) => {
 
     const roomId = socket.data.roomId;
     const room = rooms[roomId];
-    // ★ [v17] 이 방의 참가자가 맞을 때만 몰수패 처리 (다른 판의 방을 잘못 종료시키지 않도록)
+    // Forfeit only if this socket is actually a participant of the room.
     if (room && !room.ended && room.players[socket.id]) {
       const remainingId = Object.keys(room.players).find((id) => id !== socket.id);
       if (remainingId) {
-        // 남은 플레이어에게 몰수승(forfeit win) 처리.
-        // endGame을 그대로 재사용한다. (Casual이면 트로피/일반전 승수, Ranked라면 MMR/연승 정산,
-        // 친선이면 아무것도 정산하지 않는다. 카운트다운 타이머도 endGame에서 정리됨)
+        // Reuse endGame: Casual settles trophies / win count, Ranked settles MMR / streak, Friendly settles nothing.
         endGame(roomId, remainingId, { reason: 'forfeit' });
       } else {
         clearTimeout(room.endTimeoutId);
@@ -1943,8 +2015,7 @@ io.on('connection', (socket) => {
       }
     }
 
-    // ★ 소켓 기준으로 남아있던 임시 랭킹 데이터(userRatings 등)는 계정(playerId)에
-    //   이미 저장되어 있으므로, 소켓 자체 항목은 정리한다.
+    // Per-socket temporary data is already saved to the account (playerId), so remove it.
     delete userRatings[socket.id];
     delete userStreaks[socket.id];
     delete userNames[socket.id];
@@ -1954,4 +2025,4 @@ io.on('connection', (socket) => {
   });
 });
 
-server.listen(PORT, () => console.log(`서버 실행 중: http://localhost:${PORT} [build: ${BUILD_ID}]`));
+server.listen(PORT, () => console.log(`Server running: http://localhost:${PORT} [build: ${BUILD_ID}]`));

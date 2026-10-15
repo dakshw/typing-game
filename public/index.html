@@ -164,6 +164,7 @@
     .lb-list { position: relative; }
     .lb-me-summary { position: sticky; top: 0; z-index: 2; padding: 12px 16px; font-size: 1rem; color: #ddd; background: #262210; border-bottom: 2px solid var(--mt-yellow); text-align: center; }
     .lb-me-summary strong { color: var(--mt-yellow); font-size: 1.15rem; }
+
     .btn-report { background: transparent; border: 1px solid #555; color: #888; font-size: 0.72rem; padding: 3px 8px; border-radius: 4px; cursor: pointer; margin-left: 8px; vertical-align: middle; transition: all 0.15s; }
     .btn-report:hover { border-color: #ca4754; color: #ca4754; }
     .btn-report:disabled { opacity: 0.4; cursor: not-allowed; }
@@ -242,7 +243,7 @@
     .toast.warn { border-color: #ffca28; color: #ffca28; }
     .toast.error { border-color: #ca4754; color: #ca4754; }
 
-    /* 신고 모달 버튼 (기존에 스타일이 없었음) */
+    /* Report modal buttons */
     .modal-actions { display: flex; gap: 8px; justify-content: flex-end; }
     .btn-cancel, .btn-save { padding: 8px 16px; font-size: .9rem; font-weight: bold; border-radius: 6px; cursor: pointer; }
     .btn-cancel { background: transparent; border: 1px solid #555; color: #aaa; }
@@ -321,13 +322,6 @@
       </div>
     </div>
 
-    <div class="view" id="trophyView">
-      <div class="lb-fullpage">
-        <div class="lb-list" id="trophyLeaderboard">
-          <div class="lb-empty">Loading...</div>
-        </div>
-      </div>
-    </div>
     <div class="view" id="trophyView">
       <div class="lb-fullpage">
         <div class="lb-list" id="trophyLeaderboard">
@@ -423,7 +417,7 @@
 
       <div id="leaveMatchRow" style="margin-top:10px;">
         <button class="btn-secondary btn-leave-match" onclick="leaveCurrentMatch()">🚪 Leave Match (Forfeit)</button>
-        <button class="btn-secondary btn-leave-match" id="liveReportBtn" onclick="openReportModal()">⚠ 신고</button>
+        <button class="btn-secondary btn-leave-match" id="liveReportBtn" onclick="openReportModal()">⚠ Report</button>
       </div>
 
       <div class="result-banner" id="resultBanner"></div>
@@ -448,11 +442,11 @@
   <div class="toast-wrap" id="toastWrap"></div>
   <div class="report-modal-overlay" id="reportModalOverlay">
     <div class="report-modal-box">
-      <h3>⚠️ 신고</h3>
-      <div style="font-size:0.95rem; color:#ccc; margin-bottom:6px;">상대방을 핵/매크로 의심으로 신고하시겠습니까?</div>
+      <h3>⚠️ Report</h3>
+      <div style="font-size:0.95rem; color:#ccc; margin-bottom:6px;">Report your opponent for suspected cheating or macro use?</div>
       <div class="modal-actions" style="margin-top:18px;">
-        <button class="btn-cancel" onclick="closeReportModal()">취소</button>
-        <button class="btn-save" style="background:#ca4754;" onclick="submitReport()">신고하기</button>
+        <button class="btn-cancel" onclick="closeReportModal()">Cancel</button>
+        <button class="btn-save" style="background:#ca4754;" onclick="submitReport()">Submit Report</button>
       </div>
     </div>
   </div>
@@ -483,12 +477,12 @@
     /* ---------- 2) Socket ---------- */
     let socket = null;
     if (typeof io === 'undefined') {
-      setText('statusMessage', '❌ socket.io 스크립트를 불러오지 못했습니다. (/socket.io/socket.io.js 확인)');
+      setText('statusMessage', '❌ Failed to load the socket.io script. (Check /socket.io/socket.io.js)');
     } else {
       try {
         socket = io();
       } catch (e) {
-        setText('statusMessage', '❌ 서버 연결 초기화 실패: ' + e.message);
+        setText('statusMessage', '❌ Failed to initialize the server connection: ' + e.message);
       }
     }
     function emit(event, payload) { if (socket) socket.emit(event, payload); }
@@ -613,13 +607,13 @@
     let privateRoomCode = null;
     let isPrivateRoomMatch = false;
     let isQueueWaiting = false;
-    let isFriendlyMatchNow = false;   // ★ 서버가 gameStart로 알려주는 친선(연습) 매치 여부
+    let isFriendlyMatchNow = false;   // friendly (practice) match flag
     const practice = { active: false, origin: null };
 
     let lastOpponentId = null;
     let lastRoomId = null;
-    let currentRoomId = null;   // 진행 중인 경기의 roomId (gameStart 로 받음)
-    let reportTimeoutId = null;   // 신고 응답 대기 타이머 
+    let currentRoomId = null;   // roomId of the match in progress (received with gameStart)
+    let reportTimeoutId = null;   // timer waiting for the report response
     let lastMatchStats = null;
     let selectedReportReason = null;
     const reportedMatchIds = new Set();
@@ -630,19 +624,20 @@
     let rematchRequestedByMe = false;
 
     let currentView = 'play';
-    let resultScreenActive = false;   // 경기 결과 화면이 떠 있는 상태 (탭으로 결과/순위표를 오갈 때 사용)
     let currentLeaderboardTab = 'rank';
 
     let pendingOppInfo = {};
-    let myMatchRank = null;   // 이번 경기 시작 시점의 내 전역 순위 (100위 밖이면 null)s
-    // ★ [랭킹] 대전 중 키 입력 간격(ms) 기록용
+    let myMatchRank = null;   // my global rank at match start (null if outside the top 100)
+    let resultScreenActive = false;   // the match result screen is showing (used when switching tabs)
+
+    // Keystroke intervals (ms) recorded during a match, for leaderboard submission
     let keyDeltas = [];
     let lastKeyAt = null;
     let currentWpmDuration = 60;
     /* ---------- 4) Common UI ---------- */
     function setStatus(text) { setText('statusMessage', text || ''); }
 
-    // 화면 상단에 잠깐 떴다 사라지는 알림. type: 'success'(기본) | 'warn' | 'error'
+    // Toast shown briefly at the top of the screen. type: 'success' (default) | 'warn' | 'error'
     function showToast(message, type) {
       const wrap = el('toastWrap');
       if (!wrap) return;
@@ -788,7 +783,7 @@
     });
 
     sub('connect_error', (err) => {
-      setStatus('⚠️ 서버 연결 실패: ' + (err && err.message ? err.message : 'unknown'));
+      setStatus('⚠️ Server connection failed: ' + (err && err.message ? err.message : 'unknown'));
     });
 
     sub('disconnect', () => {
@@ -797,7 +792,7 @@
 
     sub('initUser', (data) => {
       if (!data) return;
-      setText('buildInfo', 'client casual-trophy-v9 · server: ' + (data.build || 'OLD (구버전 server.js 실행 중)'));
+      setText('buildInfo', 'client casual-trophy-v9 · server: ' + (data.build || 'OLD (outdated server.js running)'));
       myRating = data.rating;
       myTrophies = data.trophies || 0;
       setStreakHud(data.streak);
@@ -867,8 +862,8 @@
       toggleCls('trophyView', 'active', view === 'trophy');
       toggleCls('wpmView', 'active', view === 'wpm');
       if (resultScreenActive) {
-        removeCls('playView', 'active');                          // "Select Match Duration" 화면은 숨김
-        setDisplay('gameArea', view === 'play' ? 'block' : 'none'); // Play 탭 = 결과 화면, Rank/Trophy 탭 = 순위표만
+        removeCls('playView', 'active');                            // hide the "Select Match Duration" screen
+        setDisplay('gameArea', view === 'play' ? 'block' : 'none'); // Play tab = result screen, Rank/Trophy tab = leaderboard only
       }
       if (view === 'rank' || view === 'trophy') {
         currentLeaderboardTab = view;
@@ -902,7 +897,7 @@
       if (!data || !el('wpmLeaderboard')) return;
       if (data.duration !== currentWpmDuration) return;
       if (!data.entries || data.entries.length === 0) {
-        setHTML('wpmLeaderboard', '<div class="lb-empty">아직 등록된 기록이 없습니다.</div>');
+        setHTML('wpmLeaderboard', '<div class="lb-empty">No records yet.</div>');
         return;
       }
       const medals = ['🥇', '🥈', '🥉'];
@@ -922,6 +917,7 @@
       });
       setHTML('wpmLeaderboard', html);
     });
+
     sub('leaderboardData', (data) => {
       if (!data) return;
       const isRankTab = data.sortBy === 'rank';
@@ -934,15 +930,15 @@
       const medals = ['🥇', '🥈', '🥉'];
       let html = '';
 
-      // 내 순위 요약 (스크롤해도 맨 위에 고정)
+      // My rank summary (stays pinned at the top while scrolling)
       const me = data.entries.find((e) => e.isMe);
       if (me) {
         const myRankNo = Number.isFinite(me.rank) ? me.rank : null;
         const myScore = isRankTab ? me.rating : me.trophies;
         const scoreText = `<strong>${myScore}</strong> ${isRankTab ? 'MMR' : '🏆'}`;
         html += myRankNo !== null
-          ? `<div class="lb-me-summary">내 순위 <strong>#${myRankNo}</strong> · ${scoreText}</div>`
-          : `<div class="lb-me-summary">내 점수 ${scoreText}</div>`;
+          ? `<div class="lb-me-summary">My Rank <strong>#${myRankNo}</strong> · ${scoreText}</div>`
+          : `<div class="lb-me-summary">My Score ${scoreText}</div>`;
       }
 
       data.entries.forEach((entry, idx) => {
@@ -961,7 +957,7 @@
       });
       setHTML(targetId, html);
 
-      // 내 줄이 화면 가운데 오도록 스크롤
+      // Scroll so my row is in the middle
       const list = el(targetId);
       const meRow = list && list.querySelector('.lb-row.me');
       if (list && meRow) list.scrollTop = Math.max(0, meRow.offsetTop - list.clientHeight / 2);
@@ -1246,8 +1242,8 @@
       updateViewportScroll(0);
     }
 
-    /* 커서는 목표 위치를 매 프레임 부드럽게 따라간다 (글자마다 끊기지 않음). */
-    const CARET_SMOOTH_TAU_MS = 60;   // 작을수록 빠르게 따라붙고, 클수록 더 부드럽게 미끄러진다
+    /* The caret smoothly follows its target position every frame (it doesn't jump per character). */
+    const CARET_SMOOTH_TAU_MS = 60;   // smaller = snaps faster, larger = glides more
     const smoothCarets = new Set();
     let caretRaf = null;
     let caretLastTs = 0;
@@ -1272,7 +1268,7 @@
       const lineChanged = !first && caretEl._ty !== y;
       caretEl._tx = x;
       caretEl._ty = y;
-      if (first || lineChanged) caretEl._cx = x;   // 첫 배치 / 줄 바뀜은 즉시 이동
+      if (first || lineChanged) caretEl._cx = x;   // first placement / line change moves instantly
       smoothCarets.add(caretEl);
       caretEl.style.transform = `translate(${caretEl._cx}px, ${caretEl._ty}px)`;
       if (!caretRaf) { caretLastTs = performance.now(); caretRaf = requestAnimationFrame(caretFrame); }
@@ -1355,17 +1351,17 @@
 
       inGame = true;
       typingLocked = false;
-      // ★ [랭킹] 키 간격 기록 시작: 첫 간격 = START 신호 ~ 첫 입력까지의 시간
+      // Start recording keystroke intervals: the first interval = START signal -> first keypress
       keyDeltas = [];
       lastKeyAt = performance.now();
-      // 타이머 + Leave 버튼을 먼저 실행 (아래에서 에러가 나도 동작)
+      // Start the timer and show the Leave button first (they keep working even if something below throws)
       setDisplay('leaveMatchRow', 'block');
-      setDisplay('liveReportBtn', isPrivateRoomMatch ? 'none' : '');   // 친선(코드 방)은 신고 버튼 숨김
+      setDisplay('liveReportBtn', isPrivateRoomMatch ? 'none' : '');   // friendly (code room) matches hide the report button
       startGameTimer();
 
       setMatchAnnounce('Start!', { autoHideMs: 1000 });
 
-      // VS 배너 숨김 (실패해도 게임에 영향 없음)
+      // Hide the VS banner (a failure here doesn't affect the game)
       try {
         const vs = document.getElementById('vsBanner');
         if (vs) {
@@ -1495,7 +1491,7 @@
       setDisplay('gameArea', 'none');
     }
 
-    /* ---- Target WPM 페이스메이커 (연습 모드 전용) ---- */
+    /* ---- Target WPM pacemaker (practice mode only) ---- */
     let pacerEl = null;
     let pacerSpans = null;
     let pacerRaf = null;
@@ -1503,8 +1499,8 @@
     let pacerBase = 0;
     let pacerWpm = 50;
     let pacerEnabled = true;          // Target Line ON/OFF
-    let pacerLastInputAt = 0;         // 마지막 타이핑 시각 (idle 판정용)
-    const PACER_IDLE_MS = 1500;       // 이 시간(ms) 이상 입력이 없으면 선 정지 (1000~2000 사이로 조절 가능)
+    let pacerLastInputAt = 0;         // last typing time (for idle detection)
+    const PACER_IDLE_MS = 1500;       // the line stops if there is no input for this long (adjustable 1000~2000)
     function pacerCps() { return pacerWpm * 5 / 60; }
 
     function pacerPos() {
@@ -1551,7 +1547,7 @@
       placePacer(0);
     }
 
-    // 한 줄 안에서는 화면상 속도가 일정하도록, 글자 폭과 무관하게 줄 시작~끝을 선형으로 이동한다.
+    // Within a line the on-screen speed is constant: the line moves linearly from start to end regardless of glyph width.
     function placePacer(pos) {
       if (!pacerEl || !pacerSpans || pacerSpans.length === 0) return;
       if (!pacerEnabled) { if (pacerEl) pacerEl.style.display = 'none'; return; }
@@ -1573,7 +1569,7 @@
     function pacerTick() {
       if (!practice.active || !pacerEnabled || pacerStartAt === null) { pacerRaf = null; return; }
 
-      // 입력이 PACER_IDLE_MS 이상 없으면: 그 시점의 위치에서 선을 고정
+      // No input for PACER_IDLE_MS or more: freeze the line at that point
       if (performance.now() - pacerLastInputAt >= PACER_IDLE_MS) {
         const freezeAt = Math.max(pacerStartAt, pacerLastInputAt + PACER_IDLE_MS);
         pacerBase = pacerBase + (freezeAt - pacerStartAt) / 1000 * pacerCps();
@@ -1589,12 +1585,12 @@
       else pacerRaf = null;
     }
 
-    // 타이핑이 일어날 때마다 호출됨 (applyTypedValue 안): 입력 시각 갱신 + 멈춰 있던 선 재출발
+    // Called on every keystroke (inside applyTypedValue): refreshes the input time and restarts a frozen line
     function startPacerIfNeeded() {
       if (!practice.active || !pacerEl) return;
       pacerLastInputAt = performance.now();
       if (!pacerEnabled || pacerStartAt !== null) return;
-      pacerStartAt = performance.now();          // pacerBase(멈춘 위치)부터 다시 이동
+      pacerStartAt = performance.now();          // resumes from pacerBase (the frozen position)
       pacerRaf = requestAnimationFrame(pacerTick);
     }
 
@@ -1615,10 +1611,10 @@
       pacerStartAt = null;
 
       if (!pacerEnabled) {
-        if (pacerEl) pacerEl.style.display = 'none';   // 선 완전히 숨김
+        if (pacerEl) pacerEl.style.display = 'none';   // hide the line completely
       } else {
-        pacerBase = prevVal.length;                    // 켤 때는 내 현재 위치에서 시작
-        placePacer(pacerBase);                         // 다음 키 입력부터 이동 시작
+        pacerBase = prevVal.length;                    // when turned on, start from my current position
+        placePacer(pacerBase);                         // starts moving from the next keystroke
       }
     }
 
@@ -1685,8 +1681,8 @@
     }
 
     let physicalKeyboardSeen = false;
-    let rawInputBuf = '';            // 모바일 키보드가 입력창에 넣어 둔 문자열 (이전 값과 비교해 새 글자를 찾는 용도)
-    let preserveInputValue = false;  // true면 입력창을 비우지 않는다 (조합 중에 비우면 모바일 키보드가 입력을 버림)
+    let rawInputBuf = '';            // string a mobile keyboard has put into the input (compared with the previous value to find new characters)
+    let preserveInputValue = false;  // when true, the input is not cleared (clearing during composition makes mobile keyboards drop input)
 
     function clearTypingInput() {
       const ti = el('typingInput');
@@ -1768,15 +1764,7 @@
       typeChar(ch);
     }
 
-    function appendAsciiChars(data) {
-      for (const ch of String(data || '')) {
-        if (!canAcceptTyping()) break;
-        if (!/^[\x20-\x7E]$/.test(ch)) continue;
-        typeChar(ch);
-      }
-    }
-
-    // 입력창의 현재 문자열을 이전 값(rawInputBuf)과 비교해서, 바뀐 부분만 게임 입력으로 반영한다.
+    // Compares the input's current string with the previous value (rawInputBuf) and applies only the changed part to the game.
     function syncFromRawInput(ti) {
       const raw = (ti.value || '').replace(/[^\x20-\x7E]/g, '');
       const old = rawInputBuf;
@@ -1785,11 +1773,11 @@
 
       preserveInputValue = true;
       try {
-        for (let i = common; i < old.length; i++) {          // 지워진 글자 → Backspace
+        for (let i = common; i < old.length; i++) {          // erased characters -> Backspace
           if (!canAcceptTyping()) break;
           if (prevVal.length > 0) applyTypedValue(prevVal.slice(0, -1));
         }
-        for (let i = common; i < raw.length; i++) {          // 새로 들어온 글자
+        for (let i = common; i < raw.length; i++) {          // newly entered characters
           if (!canAcceptTyping()) break;
           typeChar(raw[i]);
         }
@@ -1804,7 +1792,7 @@
       if (!ti) return;
       if (physicalKeyboardSeen) { ti.value = ''; rawInputBuf = ''; return; }
       if (canAcceptTyping()) syncFromRawInput(ti);
-      if (!e.isComposing) { ti.value = ''; rawInputBuf = ''; }   // 조합이 끝난 상태에서만 비운다
+      if (!e.isComposing) { ti.value = ''; rawInputBuf = ''; }   // clear only once composition has ended
     }
 
     function onTypingCompositionEnd(e) {
@@ -1825,7 +1813,7 @@
       for (let i = prev.length; i < value.length; i++) {
         if (value[i] === ' ' && sampleText[i] !== ' ') { clearTypingInput(); return; }
       }
-      // ★ [랭킹] 키 입력 간격(ms) 기록: 대전 중에만 (연습 모드/카운트다운 제외). 백스페이스 포함.
+      // Record keystroke intervals (ms) during matches only (not practice / countdown). Backspace included.
       if (!practice.active && inGame && lastKeyAt !== null) {
         const nowTs = performance.now();
         if (keyDeltas.length < 5000) {
@@ -1871,8 +1859,6 @@
     }
 
     function initTypingInput() {
-
-
       const area = el('typeArea');
       if (area) {
         ['paste', 'drop', 'cut'].forEach((evt) => {
@@ -2019,14 +2005,14 @@
       if (Number.isFinite(d.opponentRank)) pendingOppInfo.rank = d.opponentRank;
     }
 
-    function streakLabel(n) { return (Number.isFinite(n) && n >= 3) ? `🔥 ${n}연승` : ''; }
+    function streakLabel(n) { return (Number.isFinite(n) && n >= 3) ? `🔥 ${n} Win Streak` : ''; }
 
     function setVsRank(id, rank) {
       const n = el(id);
       if (!n) return false;
       n.classList.remove('show', 'r1', 'r2', 'r3');
       if (Number.isFinite(rank) && rank >= 1 && rank <= 3) {
-        n.textContent = ['🥇 1위', '🥈 2위', '🥉 3위'][rank - 1];
+        n.textContent = ['🥇 1st', '🥈 2nd', '🥉 3rd'][rank - 1];
         n.classList.add('show', 'r' + rank);
         return true;
       }
@@ -2034,7 +2020,7 @@
       return false;
     }
 
-    // 1~3위는 배지가 따로 있으므로 이름 뒤의 [#순위] 태그는 중복이라 떼어낸다.
+    // Ranks 1-3 have their own badge, so the trailing [#rank] tag on the name would be a duplicate and is stripped.
     function vsDisplayName(name, rank, fallback) {
       const base = name || fallback;
       return (Number.isFinite(rank) && rank >= 1 && rank <= 3)
@@ -2080,8 +2066,8 @@
       setStreakHud(data.myStreak);
       if (data.myName) myName = data.myName;
       if (data.myAvatar) myAvatar = data.myAvatar;
-      myMatchRank = Number.isFinite(data.myRank) ? data.myRank : null;
       rememberOpp(data);
+      myMatchRank = Number.isFinite(data.myRank) ? data.myRank : null;
       renderVsBanner();
       matchActive = true;
       inGame = false;
@@ -2101,7 +2087,7 @@
       setLobbyVisible(false);
 
       isFriendlyMatchNow = data.isFriendly === true;
-      setText('modeBadge', `${data.isRanked ? '[Ranked] ' : (isFriendlyMatchNow ? '[친선] ' : '[Casual] ')}${duration}s`);
+      setText('modeBadge', `${data.isRanked ? '[Ranked] ' : (isFriendlyMatchNow ? '[Friendly] ' : '[Casual] ')}${duration}s`);
       setMatchAnnounce('Opponent found!', { autoHideMs: 1000 });
       setHTML('resultBanner', '');
       setClassName('resultBanner', 'result-banner');
@@ -2216,7 +2202,7 @@
     /* ---------- 15) Report ---------- */
     function openReportModal() {
       const submitBtn = document.querySelector('.report-modal-box .btn-save');
-      if (submitBtn) { submitBtn.disabled = false; submitBtn.innerText = '신고하기'; }
+      if (submitBtn) { submitBtn.disabled = false; submitBtn.innerText = 'Submit Report'; }
       addCls('reportModalOverlay', 'show');
     }
     function closeReportModal() {
@@ -2235,23 +2221,23 @@
     }
 
     function submitReport() {
-      // 경기 중이면 현재 경기의 roomId, 종료 후에는 마지막 경기의 roomId를 보낸다.
-      // 신고 대상(상대 ID)은 서버가 그 경기의 참가자 기록에서 직접 찾으므로 보내지 않는다.
+      // Mid-match: send the current match's roomId. After the match: the last match's roomId.
+      // The report target (opponent ID) is found by the server from the match's participant record, so it is not sent.
       const midMatch = (matchActive || inGame) && !gameEnded && !practice.active;
       const roomId = midMatch ? (currentRoomId || null) : lastRoomId;
 
-      if (!midMatch && !roomId) { showToast('⚠️ 신고할 경기 정보가 없습니다.', 'warn'); closeReportModal(); return; }
-      if (roomId && reportedMatchIds.has(roomId)) { showToast('⚠️ 이 경기는 이미 신고했습니다.', 'warn'); closeReportModal(); return; }
+      if (!midMatch && !roomId) { showToast('⚠️ No match information to report.', 'warn'); closeReportModal(); return; }
+      if (roomId && reportedMatchIds.has(roomId)) { showToast('⚠️ You have already reported this match.', 'warn'); closeReportModal(); return; }
 
       const submitBtn = document.querySelector('.report-modal-box .btn-save');
-      if (submitBtn) { submitBtn.disabled = true; submitBtn.innerText = '전송 중...'; }
+      if (submitBtn) { submitBtn.disabled = true; submitBtn.innerText = 'Sending...'; }
       emit('reportMatch', { roomId, reason: 'cheating' });
       clearTimeout(reportTimeoutId);
       reportTimeoutId = setTimeout(() => {
         const btn = document.querySelector('.report-modal-box .btn-save');
-        if (btn && btn.disabled) { btn.disabled = false; btn.innerText = '신고하기'; }
+        if (btn && btn.disabled) { btn.disabled = false; btn.innerText = 'Submit Report'; }
         closeReportModal();
-        showToast('⚠️ 서버 응답이 없습니다. 서버가 최신 버전(friendly-v20)으로 재시작되었는지 확인해주세요.', 'error');
+        showToast('⚠️ No response from the server. Please check that the server has restarted with the latest version (friendly-v20).', 'error');
       }, 5000);
     }
 
@@ -2259,25 +2245,25 @@
       clearTimeout(reportTimeoutId);
       closeReportModal();
       const submitBtn = document.querySelector('.report-modal-box .btn-save');
-      if (submitBtn) { submitBtn.disabled = false; submitBtn.innerText = '신고하기'; }
+      if (submitBtn) { submitBtn.disabled = false; submitBtn.innerText = 'Submit Report'; }
 
       if (data && data.success) {
         if (data.roomId) reportedMatchIds.add(data.roomId);
-        showToast('✅ 신고가 접수되었습니다.', 'success');
+        showToast('✅ Your report has been submitted.', 'success');
         const reportBtn = el('reportBtn');
         if (reportBtn && data.roomId === lastRoomId) { reportBtn.disabled = true; reportBtn.innerText = 'Reported'; }
       } else {
         if (data && data.code === 'ALREADY_REPORTED' && data.roomId) reportedMatchIds.add(data.roomId);
-        showToast('⚠️ ' + ((data && data.message) || '신고에 실패했습니다.'), 'warn');
+        showToast('⚠️ ' + ((data && data.message) || 'Failed to submit the report.'), 'warn');
       }
     });
 
     /* ---------- 15-B) Streak (simple) ---------- */
     const STREAK_BONUS_TXT = (b) => (Number.isFinite(b) ? ` (+${b} Bonus MMR)` : '');
     const STREAK_TIERS = [
-      { min: 10, tier: 3, text: (n, b) => `🔥 🔥 🔥 ${n} STREAK${STREAK_BONUS_TXT(b)}`, hud: (n) => `🔥 ${n}연승` },
-      { min: 5,  tier: 2, text: (n, b) => `🔥 🔥 ${n} STREAK${STREAK_BONUS_TXT(b)}`,    hud: (n) => `🔥 ${n}연승` },
-      { min: 3,  tier: 1, text: (n, b) => `🔥 ${n} STREAK${STREAK_BONUS_TXT(b)}`,       hud: (n) => `🔥 ${n}연승` }
+      { min: 10, tier: 3, text: (n, b) => `🔥 🔥 🔥 ${n} STREAK${STREAK_BONUS_TXT(b)}`, hud: (n) => `🔥 ${n} Win Streak` },
+      { min: 5,  tier: 2, text: (n, b) => `🔥 🔥 ${n} STREAK${STREAK_BONUS_TXT(b)}`,    hud: (n) => `🔥 ${n} Win Streak` },
+      { min: 3,  tier: 1, text: (n, b) => `🔥 ${n} STREAK${STREAK_BONUS_TXT(b)}`,       hud: (n) => `🔥 ${n} Win Streak` }
     ];
 
     function getStreakTier(streak) {
@@ -2302,19 +2288,19 @@
       });
     }
 
-    function clearStreakEffects() { /* 연출 제거됨 (호환용 빈 함수) */ }
+    function clearStreakEffects() { /* effects removed (empty function kept for compatibility) */ }
 
     function playStreakEffects(data) {
       setStreakHud(data && data.streak);
     }
-    /* ---------- 15-C) 랭킹 등록 (WPM 기록) ---------- */
-    // WPM은 서버가 직접 계산하므로 roomId + 키 간격 배열만 보낸다.
-    // 친선/부정행위/기권으로 끝난 판은 서버가 NO_PENDING 으로 응답하며, 그땐 아무것도 표시하지 않는다.
+    /* ---------- 15-C) Leaderboard submission (WPM record) ---------- */
+    // WPM is computed by the server, so only the roomId and the keystroke-interval array are sent.
+    // For friendly / cheat / forfeit endings the server replies NO_PENDING, and nothing is shown.
     function submitRankIfEligible(data) {
       if (!data || !data.roomId) return;
       if (isPrivateRoomMatch || data.invalidated || data.reason || data.disqualified) return;
       if (!Array.isArray(keyDeltas) || keyDeltas.length === 0) return;
-      setText('rankSubmitStatus', '⏳ 랭킹 기록 등록 중...');
+      setText('rankSubmitStatus', '⏳ Submitting your record to the leaderboard...');
       emit('submitRank', { roomId: data.roomId, deltas: keyDeltas.slice() });
     }
 
@@ -2325,11 +2311,11 @@
       if (data.success) {
         node.style.color = '#4caf50';
         node.innerText = data.isNewBest
-          ? `🏅 새 최고 기록! ${data.duration}초 ${data.wpm} WPM`
+          ? `🏅 New personal best! ${data.duration}s ${data.wpm} WPM`
           : '';
       } else {
         node.style.color = '#ca4754';
-        node.innerText = '⚠️ 랭킹 등록 거부: ' + (data.message || '');
+        node.innerText = '⚠️ Leaderboard submission rejected: ' + (data.message || '');
       }
     });
     /* ---------- 16) Game over ---------- */
@@ -2347,7 +2333,7 @@
     }
 
     function buildChangeHtml(data) {
-      // ★ 친선: 트로피/MMR 변동 표시 없음 (내 트로피 값도 건드리지 않는다)
+      // Friendly: no trophy / MMR change is shown (and my trophy value is left untouched)
       if (data.isFriendly === true || isFriendlyMatchNow) return '';
       const td = data.trophyData || {};
       const trophyDiff = Number.isFinite(td.diff) ? td.diff
@@ -2365,7 +2351,7 @@
         ? `<div class="rating-change">${data.ratingData.diff >= 0 ? '+' : ''}${data.ratingData.diff} MMR (${data.ratingData.old} → ${data.ratingData.new})</div>`
         : '';
 
-            return data.isRanked ? mmrHtml : (mmrHtml + trophyHtml);
+      return data.isRanked ? mmrHtml : (mmrHtml + trophyHtml);
     }
 
     sub('gameOver', (data) => {
@@ -2381,8 +2367,9 @@
 
       const tiEnd = el('typingInput');
       if (tiEnd) tiEnd.disabled = true;
-      setGaugeVisible(false);   // 경기 종료 → 모멘텀 게이지 숨김
-      setDisplay('leaveMatchRow', 'none');   // 경기 종료 → Leave Match / 경기 중 신고 버튼 숨김
+      setDisplay('leaveMatchRow', 'none');   // match over -> hide the Leave Match / live report buttons
+      setGaugeVisible(false);                // match over -> hide the momentum gauge
+
       if (data.opponentId) lastOpponentId = data.opponentId;
       if (data.roomId) lastRoomId = data.roomId;
       if (data.myStats) lastMatchStats = data.myStats;
@@ -2399,10 +2386,10 @@
         tagText = data.disqualified ? '🚫 DISQUALIFIED (Cheat Detected)' : '🏆 WIN (Opponent Disqualified)';
       }
 
-      // ★ 친선: 승패/점수 표현 없이 "연습 결과"로만 표시 (WPM, 정확도는 아래 비교 카드에 그대로 표시됨)
+      // Friendly: shown as a "practice result" with no win/loss wording (WPM and accuracy still appear in the compare cards)
       if (isFriendlyResult) {
         tagClass = 'draw';
-        tagText = data.reason === 'forfeit' ? '🎯 친선전 종료 (상대 퇴장)' : '🎯 친선전 — 연습 결과';
+        tagText = data.reason === 'forfeit' ? '🎯 Friendly Match Ended (Opponent Left)' : '🎯 Friendly Match — Practice Result';
       }
 
       const changeHtml = buildChangeHtml(data);
@@ -2441,7 +2428,7 @@
       `);
       setClassName('resultBanner', 'result-banner dashboard show');
       playStreakEffects(data);
-      // ★ [랭킹] 이번 판 기록을 랭킹에 등록 요청
+      // Request to submit this match's record to the leaderboard
       submitRankIfEligible(data);
       setLobbyVisible(true);
       resultScreenActive = true;
